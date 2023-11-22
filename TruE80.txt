@@ -1,0 +1,84 @@
+
+
+(ZVNY)   /T   /E   /E Q /
+(XBME)   /    /Y   /NHYH/
+
+(ZCN) (NT)Y /(NAD) G(NH) / E(CQ) /(NAD) (NG)H /
+(ZVN) (VT)Y /(VNAH) G(VH) /(CME) (CH)J /(CM) HJ /
+C    /    /    /    /
+
+
+
+(CNS)DSD/    /     /    S/
+(ZVA)N /    /    /A S /
+(ZCBS)DSD/    /    /  SA/
+(XBM)  /    /    /J QJ /
+
+(ZCNH) N /(NAD) G /D (NA)A/(CN)G /
+(ZVND) (VA)S/(VN)  /  VA/(VNA) S /
+(XVNS)D(XS)D/(XN)   /   X /(XNG) H /
+(XBMG) (BS)D/(BMS)  /  B /(BMJ) Q J /
+
+(ZCNH) N /(NAD) G /D (NA)A /(CN)G /
+(ZVND) (VA)S/(VN)  /  (VQ) /(VNW) E /
+(XVNW) (XQ)H/(NS) X /(VN) X /(NSW) (XQ)W /
+(XBM) (XBM) /(XBM) (XBM) /(XB)   /     /
+
+
+(ZCNE) N /(NAD)  N/W C /(NADQ) (NJ) /
+(ZVNH) (VG)H/(VNA)  V/  Z /(VNAG) (VQ) /
+(ZBDW)E(ZW)E/(BAD)  Z/  BG/(BADR) Z /
+(XBMW) (BQ)W/(BMS)  B/  (XE) /(BMSW) (BQ) /
+
+(ZCNQ) N /(NAD)  N/E C /(NAD) N /
+(ZVNR) (VE) /(VNAQ)  V/  Z /(VNAG) (VQ) /
+(XVNQ)W(XQ)W/(NS)  X/  V /(NSH) (XW) /
+(CMW)E(MW)E/(MD)CMD /    /    /
+
+
+
+(ZCNS)D(NS)D/(NA)   /     /(CN) SA/
+(ZV)NV /(VN)  /     /(VNA) S /
+(ZCBS)D(ZS)D/(BA)  /     /(ZBS) AM /
+(XB)A(BM)/(BM)  /     / (XBJ)QJ/
+
+(ZCNH) N /(NAD) G /D (NA)A /(CN) G /
+(ZVND) (VA)S/(VN)  /  V /(VNA) S /
+(XVNS)D(XS)D/(XN)  /  X /(XNG) H /
+(XBMG) (BS)D/(BMS)  /  B /(BMJ) Q J /
+
+(ZCNH) N /(NAD) G /D (NA)A /(CN) G /
+(ZVND) (VA)S/(VN)  /  (VQ) /(VNW) E /
+(XVNW) (XQ)H/(NS) X /(VN) XS/(NSW) (XQ)W /
+(XBM) (XBM) /(XBM) (XBM) /(XB)   /     /
+
+
+
+(ZCNE) N /(NAD)  N/W C /(NADQ) (NJ) /
+(ZVNH) (VG)H/(VNA)  V/  Z /(VNAG) (VQ) /
+(ZBDW)E(ZW)E/(BAD)  Z/  BG/(BADR) Z /
+(XBMW) (BQ)W/(BMS)  B/  (XE) /(BMSW) (BQ) /
+
+(ZCNQ) N /(NAD)  N/E C /(NAD) N /
+(ZVNR) (VE) /(VNAQ)  V/  Z /(VNAG) (VQ) /
+(XVNQ)W(XQ)W/(NS)  X/  V /(NSH) (XW) /
+(CMW)E(MW)E/(MD)CMD /    /    /
+
+
+
+(VNAH)   /     /(BMSJ)   /     /
+(NADQ)   /     /(BMSW)   /     /
+(VNAR)   /(VNA)   /(BMSG)   /(BMSY) T /
+(ZCNY) (ZCN) /(ZCN) (ZCN) /     /     /
+
+
+
+(NDE)   /     /W   /Q J /
+(VAH) GH/     /   Z/(VNAG) (VQ) /
+(ZBDW)E(ZW)E/(BAD)  Z/  BG/(BADR) Z /
+(XBMW) (BQ)W/(BMS)  B/  (XE) /(BMSW) (BQ) /
+
+(ZCNQ) N /(NAD)  N/E C /(NAD) N /
+(ZVNR) (VE) /(VNAQ)  V/  Z /(VNAG) (VQ) /
+(XVNQ)W(XQ)W/(NS)  X/  V /(NSH) (XW) /
+(CMW)E(MW)E/(MD)CMD/    /    /
