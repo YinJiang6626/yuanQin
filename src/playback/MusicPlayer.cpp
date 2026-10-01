@@ -76,15 +76,18 @@ PlaybackResult MusicPlayer::play(const core::Score& score, IKeySender& sender,
             continue;
         }
 
+        const auto& steps = event.arpeggioSteps;
+        const std::size_t stepCount = steps.empty() ? event.notes.size() : steps.size();
         const auto noteInterval = tickDuration * options.arpeggioNoteSpanTicks /
-                                  static_cast<double>(event.notes.size());
-        for (std::size_t noteIndex = 0; noteIndex < event.notes.size(); ++noteIndex) {
+                                  static_cast<double>(stepCount);
+        for (std::size_t stepIndex = 0; stepIndex < stepCount; ++stepIndex) {
             const auto noteTime = tickTime + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                                                 noteInterval * static_cast<double>(noteIndex));
+                                                 noteInterval * static_cast<double>(stepIndex));
             if (!waitUntil(noteTime, shouldCancel)) {
                 return {PlaybackStatus::Cancelled, tickIndex};
             }
-            if (!sender.sendKey(event.notes[noteIndex])) {
+            if (steps.empty() ? !sender.sendKey(event.notes[stepIndex])
+                              : !sender.sendChord(steps[stepIndex])) {
                 return {PlaybackStatus::SendFailed, tickIndex};
             }
         }

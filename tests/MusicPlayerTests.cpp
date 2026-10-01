@@ -77,6 +77,15 @@ int main() {
     require(progress == std::vector<std::size_t>({0, 1, 2, 3}),
             "arpeggio reports every occupied minimum interval");
 
+    RecordingSender nestedPipaSender;
+    const auto nestedPipaScore = ScoreParser::parseText("[(ASD)ADF]   /").score;
+    const auto nestedPipaResult = player.play(nestedPipaScore, nestedPipaSender, options);
+    require(nestedPipaResult.status == PlaybackStatus::Completed,
+            "pipa chord playback completes");
+    require(nestedPipaSender.chords == std::vector<std::vector<char>>{
+                {'A', 'S', 'D'}, {'A'}, {'D'}, {'F'}},
+            "a pipa chord is emitted as one simultaneous step before individual notes");
+
     RecordingSender cancelledSender;
     const auto cancelled = player.play(score, cancelledSender, options, [] { return true; });
     require(cancelled.status == PlaybackStatus::Cancelled && cancelledSender.notes.empty(),

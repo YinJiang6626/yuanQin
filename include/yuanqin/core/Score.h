@@ -6,7 +6,8 @@
 
 namespace yuanqin::core {
 
-// A normal event presses every note at once. An arpeggio plays its notes in order.
+// A normal event presses every note at once. An arpeggio plays its steps in order;
+// each step may itself contain a chord.
 enum class PlayStyle {
     Chord,
     Arpeggio,
@@ -15,6 +16,7 @@ enum class PlayStyle {
 struct NoteEvent {
     PlayStyle style{PlayStyle::Chord};
     std::vector<char> notes;
+    std::vector<std::vector<char>> arpeggioSteps;
 };
 
 // One sixteenth-note-sized position in a score. An empty value is a rest.

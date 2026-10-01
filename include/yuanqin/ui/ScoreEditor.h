@@ -72,6 +72,9 @@ private:
     void replaceSelection(const std::vector<std::string>& values, bool insertBefore);
     void typeNote(char note);
     void beginGroup(char opening);
+    [[nodiscard]] bool moveGroupCaret(int delta);
+    [[nodiscard]] bool deleteGroupBackward();
+    void resetGroupCaret();
     void clearSelection();
     void deleteSelectionBackward();
     void copySelectionToClipboard() const;
@@ -81,7 +84,7 @@ private:
     [[nodiscard]] bool hasSelection() const noexcept;
     [[nodiscard]] std::size_t displayedRowCount() const;
     [[nodiscard]] std::vector<CellLayout> calculateLayout(int clientWidth) const;
-    [[nodiscard]] bool selectAt(POINT point);
+    [[nodiscard]] bool selectAt(POINT point, bool toggleGroupEditing = false);
     [[nodiscard]] ScoreDocument* activeDocument() noexcept;
     [[nodiscard]] const ScoreDocument* activeDocument() const noexcept;
     [[nodiscard]] ScoreDocument* documentFor(Hand hand) noexcept;
@@ -104,6 +107,8 @@ private:
     std::size_t selectionAnchorTick_{0};
     bool mouseSelecting_{false};
     bool insertMode_{false};
+    std::size_t groupCaretOffset_{0};
+    bool groupEditing_{false};
     int scrollOffset_{0};
     bool playbackActive_{false};
     bool followPlayback_{true};

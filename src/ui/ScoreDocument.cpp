@@ -29,19 +29,49 @@ EditableMeasure parseMeasure(std::string_view source) {
             continue;
         }
 
-        if (value == '(' || value == '[') {
-            const char closing = value == '(' ? ')' : ']';
+        if (value == '(') {
             std::string group(1, value);
-            while (index < source.size() && source[index] != closing) {
+            while (index < source.size() && source[index] != ')') {
                 if (core::ScoreParser::isPlayableNote(source[index])) {
                     group.push_back(normalize(source[index]));
                 }
                 ++index;
             }
-            if (index < source.size() && source[index] == closing) {
+            if (index < source.size() && source[index] == ')') {
                 ++index;
             }
-            group.push_back(closing);
+            group.push_back(')');
+            result.beats[beatIndex++] = std::move(group);
+            continue;
+        }
+
+        if (value == '[') {
+            std::string group("[");
+            while (index < source.size() && source[index] != ']') {
+                const char current = source[index++];
+                if (current == '(') {
+                    std::string chord("(");
+                    while (index < source.size() && source[index] != ')') {
+                        if (core::ScoreParser::isPlayableNote(source[index])) {
+                            chord.push_back(normalize(source[index]));
+                        }
+                        ++index;
+                    }
+                    if (index < source.size() && source[index] == ')') {
+                        ++index;
+                    }
+                    if (chord.size() > 1) {
+                        chord.push_back(')');
+                        group += chord;
+                    }
+                } else if (core::ScoreParser::isPlayableNote(current)) {
+                    group.push_back(normalize(current));
+                }
+            }
+            if (index < source.size() && source[index] == ']') {
+                ++index;
+            }
+            group.push_back(']');
             result.beats[beatIndex++] = std::move(group);
             continue;
         }
@@ -61,15 +91,37 @@ std::string sanitizeBeat(std::string_view value) {
     }
 
     const char first = value.front();
-    if (first == '(' || first == '[') {
-        const char closing = first == '(' ? ')' : ']';
-        std::string result(1, first);
+    if (first == '(') {
+        std::string result("(");
         for (std::size_t index = 1; index < value.size(); ++index) {
             if (core::ScoreParser::isPlayableNote(value[index])) {
                 result.push_back(normalize(value[index]));
             }
         }
-        result.push_back(closing);
+        result.push_back(')');
+        return result;
+    }
+
+    if (first == '[') {
+        std::string result("[");
+        for (std::size_t index = 1; index < value.size() && value[index] != ']'; ++index) {
+            const char current = value[index];
+            if (current == '(') {
+                std::string chord("(");
+                while (++index < value.size() && value[index] != ')') {
+                    if (core::ScoreParser::isPlayableNote(value[index])) {
+                        chord.push_back(normalize(value[index]));
+                    }
+                }
+                if (chord.size() > 1) {
+                    chord.push_back(')');
+                    result += chord;
+                }
+            } else if (core::ScoreParser::isPlayableNote(current)) {
+                result.push_back(normalize(current));
+            }
+        }
+        result.push_back(']');
         return result;
     }
 
@@ -185,14 +237,90 @@ void ScoreDocument::beginGroup(std::size_t measureIndex, std::size_t beatIndex, 
     measures_[measureIndex].beats[beatIndex] = opening == '(' ? "()" : "[]";
 }
 
+bool ScoreDocument::insertGroupNote(std::size_t measureIndex, std::size_t beatIndex,
+                                    std::size_t& caretOffset, char note) {
+    if (measureIndex >= measures_.size() || beatIndex >= kBeatsPerMeasure) {
+        return false;
+    }
+    auto& value = measures_[measureIndex].beats[beatIndex];
+    if (value.size() < 2 || (value.front() != '(' && value.front() != '[') ||
+        (value.back() != ')' && value.back() != ']') ||
+        !core::ScoreParser::isPlayableNote(note)) {
+        return false;
+    }
+    caretOffset = std::clamp(caretOffset, std::size_t{1}, value.size() - 1);
+    value.insert(value.begin() + static_cast<std::ptrdiff_t>(caretOffset), normalize(note));
+    ++caretOffset;
+    return true;
+}
+
+bool ScoreDocument::insertPipaChord(std::size_t measureIndex, std::size_t beatIndex,
+                                    std::size_t& caretOffset) {
+    if (measureIndex >= measures_.size() || beatIndex >= kBeatsPerMeasure ||
+        measures_[measureIndex].beats[beatIndex].size() < 2) {
+        return false;
+    }
+    auto& value = measures_[measureIndex].beats[beatIndex];
+    if (value.front() != '[' || value.back() != ']') {
+        return false;
+    }
+    caretOffset = std::clamp(caretOffset, std::size_t{1}, value.size() - 1);
+    value.insert(caretOffset, "()");
+    ++caretOffset;
+    return true;
+}
+
+bool ScoreDocument::eraseGroupCharacterBefore(std::size_t measureIndex,
+                                              std::size_t beatIndex,
+                                              std::size_t& caretOffset) {
+    if (measureIndex >= measures_.size() || beatIndex >= kBeatsPerMeasure) {
+        return false;
+    }
+    auto& value = measures_[measureIndex].beats[beatIndex];
+    if (value.size() < 2 || (value.front() != '(' && value.front() != '[') ||
+        (value.back() != ')' && value.back() != ']')) {
+        return false;
+    }
+    caretOffset = std::clamp(caretOffset, std::size_t{1}, value.size() - 1);
+    if (value == "()" || value == "[]") {
+        value.clear();
+        caretOffset = 0;
+        return true;
+    }
+    if (caretOffset <= 1) {
+        return false;
+    }
+    const std::size_t eraseIndex = caretOffset - 1;
+    if (value[eraseIndex] == '(' && eraseIndex + 1 < value.size() &&
+        value[eraseIndex + 1] == ')') {
+        value.erase(eraseIndex, 2);
+    } else {
+        value.erase(eraseIndex, 1);
+    }
+    --caretOffset;
+    return true;
+}
+
 void ScoreDocument::backspace(std::size_t measureIndex, std::size_t beatIndex) {
     if (measureIndex >= measures_.size() || beatIndex >= kBeatsPerMeasure) {
         return;
     }
 
     auto& value = measures_[measureIndex].beats[beatIndex];
-    if (value.size() > 2 && (value.front() == '(' || value.front() == '[')) {
+    if (value.size() > 2 && value.front() == '(') {
         value.erase(value.end() - 2);
+    } else if (value.size() > 2 && value.front() == '[') {
+        const auto last = value.end() - 2;
+        if (*last == ')') {
+            const auto opening = value.rfind('(', value.size() - 2);
+            if (opening != std::string::npos) {
+                value.erase(opening, value.size() - opening - 1);
+            } else {
+                value.erase(last);
+            }
+        } else {
+            value.erase(last);
+        }
     } else {
         value.clear();
     }

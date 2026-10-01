@@ -36,6 +36,13 @@ public:
     void setBeat(std::size_t measureIndex, std::size_t beatIndex, std::string value);
     void typeNote(std::size_t measureIndex, std::size_t beatIndex, char note);
     void beginGroup(std::size_t measureIndex, std::size_t beatIndex, char opening);
+    [[nodiscard]] bool insertGroupNote(std::size_t measureIndex, std::size_t beatIndex,
+                                       std::size_t& caretOffset, char note);
+    [[nodiscard]] bool insertPipaChord(std::size_t measureIndex, std::size_t beatIndex,
+                                       std::size_t& caretOffset);
+    [[nodiscard]] bool eraseGroupCharacterBefore(std::size_t measureIndex,
+                                                  std::size_t beatIndex,
+                                                  std::size_t& caretOffset);
     void backspace(std::size_t measureIndex, std::size_t beatIndex);
     void clearBeat(std::size_t measureIndex, std::size_t beatIndex);
 

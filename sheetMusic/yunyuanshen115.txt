@@ -1,0 +1,47 @@
+A  D  /B  S  /A    /  A  /
+
+A  D  /B  A  /    /    /
+
+A  D  /B  S  /A    /  A  /
+
+A  D  /B  A  /    /    /
+
+
+
+A  D  /B  S  /A    /  A  /
+
+A  D  /B  A  /    /    /
+
+A  D  /B  S  /A    /  A  /
+
+A  D  /B  A  /    /    /
+
+
+
+A  D  /B  S  /A    /  A  /
+
+A  D  /B  A  /    /    /
+
+A  D  /B  S  /A    /  A  /
+
+A  D  /B  A  /    /    /
+
+
+
+A    /A    /B  A  /  A  /
+
+  A  /S  A  /D    /S    /
+
+A    /A    /B  A  /  A  /
+
+  A  /S  A  /D    /S    /
+
+
+
+A    /A    /B  A  /  A  /
+
+  A  /S  A  /D    /S    /
+
+A    /A    /B  A  /  A  /
+
+  A  /S  A  /D    /A    /

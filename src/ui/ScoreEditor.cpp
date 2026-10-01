@@ -92,6 +92,8 @@ void ScoreEditor::setDocument(ScoreDocument* document) {
     selectedMeasure_ = 0;
     selectedBeat_ = 0;
     selectionAnchorTick_ = 0;
+    groupCaretOffset_ = 0;
+    groupEditing_ = false;
     scrollOffset_ = 0;
     playbackActive_ = false;
     followPlayback_ = true;
@@ -111,6 +113,8 @@ void ScoreEditor::setCompositionDocuments(ScoreDocument* right, ScoreDocument* l
     selectedMeasure_ = 0;
     selectedBeat_ = 0;
     selectionAnchorTick_ = 0;
+    groupCaretOffset_ = 0;
+    groupEditing_ = false;
     scrollOffset_ = 0;
     playbackActive_ = false;
     followPlayback_ = true;
@@ -133,9 +137,11 @@ void ScoreEditor::setActiveHand(Hand hand) {
 }
 
 void ScoreEditor::setSelectionRange(std::size_t anchorTick, std::size_t caretTick) {
+    groupEditing_ = false;
     selectionAnchorTick_ = anchorTick;
     selectedMeasure_ = caretTick / kBeatsPerMeasure;
     selectedBeat_ = caretTick % kBeatsPerMeasure;
+    resetGroupCaret();
     updateScrollBar();
     ensureSelectionVisible();
     if (window_) {
@@ -298,7 +304,7 @@ LRESULT ScoreEditor::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
                 SetFocus(window_);
             }
             POINT point{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
-            if (selectAt(point)) {
+            if (selectAt(point, true)) {
                 followPlayback_ = true;
                 KillTimer(window_, kReturnToPlayheadTimer);
                 selectionAnchorTick_ = selectedTick();
@@ -403,6 +409,10 @@ LRESULT ScoreEditor::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
                     beginGroup(wParam == VK_OEM_4 ? '[' : '(');
                     return 0;
                 }
+                if (wParam == '0' && (GetKeyState(VK_SHIFT) & 0x8000)) {
+                    beginGroup('(');
+                    return 0;
+                }
                 if (wParam == VK_SPACE) {
                     replaceSelection({std::string{}}, insertMode_);
                     return 0;
@@ -410,8 +420,14 @@ LRESULT ScoreEditor::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
             }
             const bool extendSelection = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
             switch (wParam) {
-                case VK_LEFT: moveSelection(-1, extendSelection); return 0;
-                case VK_RIGHT: moveSelection(1, extendSelection); return 0;
+                case VK_LEFT:
+                    if (!extendSelection && moveGroupCaret(-1)) return 0;
+                    moveSelection(-1, extendSelection);
+                    return 0;
+                case VK_RIGHT:
+                    if (!extendSelection && moveGroupCaret(1)) return 0;
+                    moveSelection(1, extendSelection);
+                    return 0;
                 case VK_UP: moveSelection(-static_cast<long long>(kBeatsPerMeasure * kMeasuresPerRow), extendSelection); return 0;
                 case VK_DOWN: moveSelection(kBeatsPerMeasure * kMeasuresPerRow, extendSelection); return 0;
                 case VK_TAB: moveSelection(extendSelection ? -1 : 1, extendSelection); return 0;
@@ -425,12 +441,28 @@ LRESULT ScoreEditor::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
                                  extendSelection);
                     return 0;
                 case VK_BACK:
+                    if (deleteGroupBackward()) return 0;
                     deleteSelectionBackward();
                     return 0;
                 case VK_DELETE:
                     clearSelection();
                     return 0;
                 case VK_RETURN:
+                    if (!hasSelection()) {
+                        const auto* document = activeDocument();
+                        const auto& value = document
+                            ? document->beat(selectedMeasure_, selectedBeat_)
+                            : std::string{};
+                        if (value.size() >= 2 &&
+                            (value.front() == '(' || value.front() == '[')) {
+                            groupEditing_ = !groupEditing_;
+                            if (groupEditing_) {
+                                resetGroupCaret();
+                            }
+                            InvalidateRect(window_, nullptr, FALSE);
+                            return 0;
+                        }
+                    }
                     moveSelection(1, false);
                     return 0;
                 default:
@@ -689,6 +721,26 @@ void ScoreEditor::paint() {
             const std::wstring wideValue = widenAscii(value);
             DrawTextW(context, wideValue.c_str(), -1, &textRect,
                       DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+            const bool hasGroupCursor = caret && groupEditing_ && !playbackActive_ && value.size() >= 2 &&
+                (value.front() == '(' || value.front() == '[') && groupCaretOffset_ > 0 &&
+                groupCaretOffset_ < value.size();
+            if (hasGroupCursor) {
+                SIZE total{};
+                SIZE prefix{};
+                GetTextExtentPoint32W(context, wideValue.c_str(),
+                                      static_cast<int>(wideValue.size()), &total);
+                GetTextExtentPoint32W(context, wideValue.c_str(),
+                                      static_cast<int>(groupCaretOffset_), &prefix);
+                const int textStart = (textRect.left + textRect.right - total.cx) / 2;
+                const int caretX = std::clamp(textStart + prefix.cx, textRect.left + 2,
+                                              textRect.right - 2);
+                const HPEN caretPen = CreatePen(PS_SOLID, 2, RGB(84, 59, 156));
+                const auto oldPen = SelectObject(context, caretPen);
+                MoveToEx(context, caretX, textRect.top + 5, nullptr);
+                LineTo(context, caretX, textRect.bottom - 5);
+                SelectObject(context, oldPen);
+                DeleteObject(caretPen);
+            }
         }
     }
 
@@ -805,6 +857,8 @@ void ScoreEditor::setCaretTick(std::size_t tickIndex, bool extendSelection) {
     if (!extendSelection) {
         selectionAnchorTick_ = tickIndex;
     }
+    groupEditing_ = false;
+    resetGroupCaret();
     updateScrollBar();
     ensureSelectionVisible();
     InvalidateRect(window_, nullptr, FALSE);
@@ -826,6 +880,77 @@ void ScoreEditor::moveSelection(long long beatDelta, bool extendSelection) {
     const long long current = static_cast<long long>(selectedTick());
     const long long next = std::max(0LL, current + beatDelta);
     setCaretTick(static_cast<std::size_t>(next), extendSelection);
+}
+
+void ScoreEditor::resetGroupCaret() {
+    const auto* document = activeDocument();
+    if (!document) {
+        groupCaretOffset_ = 0;
+        return;
+    }
+    const auto& value = document->beat(selectedMeasure_, selectedBeat_);
+    groupCaretOffset_ = value.size() >= 2 && (value.front() == '(' || value.front() == '[')
+        ? value.size() - 1
+        : 0;
+}
+
+bool ScoreEditor::moveGroupCaret(int delta) {
+    if (hasSelection() || !groupEditing_) {
+        return false;
+    }
+    const auto* document = activeDocument();
+    if (!document) {
+        return false;
+    }
+    const auto& value = document->beat(selectedMeasure_, selectedBeat_);
+    if (value.size() < 2 || (value.front() != '(' && value.front() != '[')) {
+        return false;
+    }
+    if (groupCaretOffset_ == 0 || groupCaretOffset_ >= value.size()) {
+        groupCaretOffset_ = value.size() - 1;
+    }
+    if ((delta < 0 && groupCaretOffset_ <= 1) ||
+        (delta > 0 && groupCaretOffset_ >= value.size() - 1)) {
+        groupEditing_ = false;
+        InvalidateRect(window_, nullptr, FALSE);
+        return false;
+    }
+    groupCaretOffset_ = static_cast<std::size_t>(std::clamp(
+        static_cast<long long>(groupCaretOffset_) + delta, 1LL,
+        static_cast<long long>(value.size() - 1)));
+    if (window_) {
+        InvalidateRect(window_, nullptr, FALSE);
+    }
+    return true;
+}
+
+bool ScoreEditor::deleteGroupBackward() {
+    if (!groupEditing_ || hasSelection()) {
+        return false;
+    }
+    auto* document = activeDocument();
+    if (!document) {
+        return false;
+    }
+    const auto& value = document->beat(selectedMeasure_, selectedBeat_);
+    if (value.size() < 2 || (value.front() != '(' && value.front() != '[')) {
+        groupEditing_ = false;
+        return false;
+    }
+    const bool willChange = value == "()" || value == "[]" || groupCaretOffset_ > 1;
+    if (willChange) {
+        notifyBeforeChange();
+    }
+    const bool changed = document->eraseGroupCharacterBefore(
+        selectedMeasure_, selectedBeat_, groupCaretOffset_);
+    if (changed) {
+        if (document->beat(selectedMeasure_, selectedBeat_).empty()) {
+            groupEditing_ = false;
+        }
+        notifyChanged();
+    }
+    InvalidateRect(window_, nullptr, FALSE);
+    return true;
 }
 
 void ScoreEditor::replaceSelection(const std::vector<std::string>& values, bool insertBefore) {
@@ -855,13 +980,24 @@ void ScoreEditor::typeNote(char note) {
     if (!document) {
         return;
     }
+    const auto& before = document->beat(selectedMeasure_, selectedBeat_);
+    const bool isGroup = before.size() >= 2 && (before.front() == '(' || before.front() == '[');
+    if (!hasSelection() && isGroup && groupEditing_) {
+        notifyBeforeChange();
+        if (document->insertGroupNote(selectedMeasure_, selectedBeat_, groupCaretOffset_, note)) {
+            notifyChanged();
+            return;
+        }
+    }
+    if (!hasSelection() && isGroup && !groupEditing_) {
+        moveSelection(1, false);
+        typeNote(note);
+        return;
+    }
     if (hasSelection() || insertMode_) {
         replaceSelection({std::string(1, note)}, insertMode_);
         return;
     }
-
-    const auto& before = document->beat(selectedMeasure_, selectedBeat_);
-    const bool isGroup = before.size() >= 2 && (before.front() == '(' || before.front() == '[');
     notifyBeforeChange();
     document->typeNote(selectedMeasure_, selectedBeat_, note);
     notifyChanged();
@@ -875,12 +1011,29 @@ void ScoreEditor::beginGroup(char opening) {
     if (!document) {
         return;
     }
-    if (hasSelection() || insertMode_) {
+    const auto& value = document->beat(selectedMeasure_, selectedBeat_);
+    if (opening == '(' && !hasSelection() && value.size() >= 2 &&
+        value.front() == '[' && value.back() == ']' && groupEditing_) {
+        notifyBeforeChange();
+        if (document->insertPipaChord(selectedMeasure_, selectedBeat_, groupCaretOffset_)) {
+            notifyChanged();
+            return;
+        }
+    }
+    if (!hasSelection() && value.size() >= 2 &&
+        (value.front() == '(' || value.front() == '[') && !groupEditing_) {
+        moveSelection(1, false);
+        beginGroup(opening);
+        return;
+    }
+    if (hasSelection()) {
         replaceSelection({opening == '(' ? "()" : "[]"}, insertMode_);
         return;
     }
     notifyBeforeChange();
     document->beginGroup(selectedMeasure_, selectedBeat_, opening);
+    groupCaretOffset_ = 1;
+    groupEditing_ = true;
     notifyChanged();
 }
 
@@ -1007,7 +1160,9 @@ std::vector<std::string> ScoreEditor::clipboardBeats() const {
             const char closing = value == '(' ? ')' : ']';
             std::string group(1, value);
             while (index < text.size() && text[index] != closing) {
-                if (core::ScoreParser::isPlayableNote(text[index])) {
+                if (value == '[' && (text[index] == '(' || text[index] == ')')) {
+                    group.push_back(text[index]);
+                } else if (core::ScoreParser::isPlayableNote(text[index])) {
                     group.push_back(text[index]);
                 }
                 ++index;
@@ -1037,14 +1192,28 @@ void ScoreEditor::pasteClipboard() {
     replaceSelection(values, insertMode_);
 }
 
-bool ScoreEditor::selectAt(POINT point) {
+bool ScoreEditor::selectAt(POINT point, bool toggleGroupEditing) {
     RECT client{};
     GetClientRect(window_, &client);
     for (const auto& cell : calculateLayout(client.right)) {
         if (PtInRect(&cell.bounds, point)) {
+            const bool sameCell = activeHand_ == cell.hand &&
+                selectedMeasure_ == cell.measureIndex && selectedBeat_ == cell.beatIndex &&
+                !hasSelection();
             activeHand_ = cell.hand;
             selectedMeasure_ = cell.measureIndex;
             selectedBeat_ = cell.beatIndex;
+            const auto* document = activeDocument();
+            const std::string value = document ? document->beat(selectedMeasure_, selectedBeat_)
+                                               : std::string{};
+            const bool isGroup = value.size() >= 2 &&
+                (value.front() == '(' || value.front() == '[');
+            if (sameCell && toggleGroupEditing && isGroup) {
+                groupEditing_ = !groupEditing_;
+            } else if (!sameCell) {
+                groupEditing_ = isGroup;
+                resetGroupCaret();
+            }
             return true;
         }
     }

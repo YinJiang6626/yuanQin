@@ -59,6 +59,52 @@ std::vector<char> parseGroup(std::string_view source, std::size_t& index, char c
     return notes;
 }
 
+struct ParsedArpeggio {
+    std::vector<char> notes;
+    std::vector<std::vector<char>> steps;
+};
+
+ParsedArpeggio parseArpeggio(std::string_view source, std::size_t& index,
+                             std::size_t sourceOffset, ParseResult& result) {
+    ParsedArpeggio arpeggio;
+    const std::size_t groupStart = index - 1;
+
+    while (index < source.size() && source[index] != ']') {
+        const char value = source[index++];
+        if (ScoreParser::isPlayableNote(value)) {
+            const char note = normalizeNote(value);
+            arpeggio.notes.push_back(note);
+            arpeggio.steps.push_back({note});
+            continue;
+        }
+        if (value == '(') {
+            auto chord = parseGroup(source, index, ')', sourceOffset, result);
+            if (!chord.empty()) {
+                arpeggio.notes.insert(arpeggio.notes.end(), chord.begin(), chord.end());
+                arpeggio.steps.push_back(std::move(chord));
+            } else {
+                addDiagnostic(result, sourceOffset + index - 1,
+                              "琵琶音内的空和弦已忽略。");
+            }
+            continue;
+        }
+        if (value == ')') {
+            addDiagnostic(result, sourceOffset + index - 1,
+                          "琵琶音内发现未匹配的和弦结束符，已忽略。");
+        } else if (std::isalpha(static_cast<unsigned char>(value))) {
+            addDiagnostic(result, sourceOffset + index - 1,
+                          "此字符不是原神竖琴的有效按键，已忽略。");
+        }
+    }
+
+    if (index == source.size()) {
+        addDiagnostic(result, sourceOffset + groupStart, "音符组缺少结束符。");
+        return {};
+    }
+    ++index;  // ']'
+    return arpeggio;
+}
+
 void parseMeasure(std::string_view source, std::size_t sourceOffset, ParseResult& result,
                   std::vector<Tick>& destination) {
     std::vector<Tick> measure(kTicksPerMeasure);
@@ -74,9 +120,8 @@ void parseMeasure(std::string_view source, std::size_t sourceOffset, ParseResult
             continue;
         }
 
-        if (value == '(' || value == '[') {
-            const char closing = value == '(' ? ')' : ']';
-            auto notes = parseGroup(source, index, closing, sourceOffset, result);
+        if (value == '(') {
+            auto notes = parseGroup(source, index, ')', sourceOffset, result);
             if (notes.empty()) {
                 if (tick < kTicksPerMeasure) {
                     ++tick;
@@ -84,8 +129,23 @@ void parseMeasure(std::string_view source, std::size_t sourceOffset, ParseResult
                 addDiagnostic(result, sourceOffset + index - 1, "空音符组会被当作休止符。");
                 continue;
             }
+            addEvent(measure, tick, {PlayStyle::Chord, std::move(notes), {}}, result,
+                     sourceOffset + index - 1);
+            continue;
+        }
+
+        if (value == '[') {
+            auto arpeggio = parseArpeggio(source, index, sourceOffset, result);
+            if (arpeggio.steps.empty()) {
+                if (tick < kTicksPerMeasure) {
+                    ++tick;
+                }
+                addDiagnostic(result, sourceOffset + index - 1, "空音符组会被当作休止符。");
+                continue;
+            }
             addEvent(measure, tick,
-                     {value == '(' ? PlayStyle::Chord : PlayStyle::Arpeggio, std::move(notes)},
+                     {PlayStyle::Arpeggio, std::move(arpeggio.notes),
+                      std::move(arpeggio.steps)},
                      result, sourceOffset + index - 1);
             continue;
         }
@@ -96,7 +156,7 @@ void parseMeasure(std::string_view source, std::size_t sourceOffset, ParseResult
         }
 
         if (ScoreParser::isPlayableNote(value)) {
-            addEvent(measure, tick, {PlayStyle::Chord, {normalizeNote(value)}}, result,
+            addEvent(measure, tick, {PlayStyle::Chord, {normalizeNote(value)}, {}}, result,
                      sourceOffset + index - 1);
         } else if (std::isalpha(static_cast<unsigned char>(value))) {
             addDiagnostic(result, sourceOffset + index - 1,

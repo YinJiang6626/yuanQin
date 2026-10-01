@@ -42,6 +42,19 @@ int main() {
     require(firstNote(grouped.score.ticks()[2]) == 'J', "note after group is retained");
     require(!grouped.score.ticks()[3], "space creates a rest");
 
+    const auto nestedPipa = ScoreParser::parseText("[(ASD)ADF]   /");
+    require(nestedPipa.success, "pipa chords parse successfully");
+    const auto& nestedEvent = *nestedPipa.score.ticks()[0];
+    require(nestedEvent.style == PlayStyle::Arpeggio,
+            "nested notation remains an arpeggio event");
+    require(nestedEvent.arpeggioSteps.size() == 4,
+            "a pipa chord plus three notes creates four playback steps");
+    require(nestedEvent.arpeggioSteps[0] == std::vector<char>({'A', 'S', 'D'}),
+            "the first pipa step preserves its chord");
+    require(nestedEvent.arpeggioSteps[1] == std::vector<char>({'A'}) &&
+                nestedEvent.arpeggioSteps[3] == std::vector<char>({'F'}),
+            "remaining pipa notes stay sequential");
+
     const auto pipaMeasure = ScoreParser::parseText("[XVAF]   /");
     require(pipaMeasure.score.ticks()[0]->style == PlayStyle::Arpeggio, "pipa event is retained");
     require(!pipaMeasure.score.ticks()[1] && !pipaMeasure.score.ticks()[2] &&
