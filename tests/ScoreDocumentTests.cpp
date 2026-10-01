@@ -47,5 +47,20 @@ int main() {
     edited.typeNote(0, 2, 'z');
     require(edited.beat(0, 2) == "[Z]", "brackets auto-complete for arpeggios");
 
+    auto linear = ScoreDocument::fromText("ASDF/");
+    linear.insertBeat(1, "Q");
+    require(linear.beat(0, 0) == "A" && linear.beat(0, 1) == "Q" &&
+                linear.beat(0, 2) == "S" && linear.beat(0, 3) == "D" &&
+                linear.beat(1, 0) == "F",
+            "insertion shifts all following beats without overwriting them");
+    linear.eraseBeats(1, 2);
+    require(linear.beat(0, 0) == "A" && linear.beat(0, 1) == "D" &&
+                linear.beat(0, 2) == "F" && linear.beat(0, 3).empty(),
+            "erasing a range pulls later beats forward");
+    linear.clearBeats(0, 2);
+    require(linear.beat(0, 0).empty() && linear.beat(0, 1).empty() &&
+                linear.beat(0, 2) == "F",
+            "clearing a range leaves following beats in place");
+
     std::cout << "Score document tests passed.\n";
 }

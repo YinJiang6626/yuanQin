@@ -126,6 +126,10 @@ std::size_t ScoreDocument::measureCount() const noexcept {
     return measures_.size();
 }
 
+std::size_t ScoreDocument::beatCount() const noexcept {
+    return measures_.size() * kBeatsPerMeasure;
+}
+
 const EditableMeasure* ScoreDocument::measure(std::size_t index) const noexcept {
     return index < measures_.size() ? &measures_[index] : nullptr;
 }
@@ -198,6 +202,77 @@ void ScoreDocument::clearBeat(std::size_t measureIndex, std::size_t beatIndex) {
     if (measureIndex < measures_.size() && beatIndex < kBeatsPerMeasure) {
         measures_[measureIndex].beats[beatIndex].clear();
     }
+}
+
+std::vector<std::string> ScoreDocument::beatsInRange(std::size_t startTick,
+                                                      std::size_t count) const {
+    std::vector<std::string> result;
+    result.reserve(count);
+    for (std::size_t offset = 0; offset < count; ++offset) {
+        const std::size_t tick = startTick + offset;
+        result.push_back(beat(tick / kBeatsPerMeasure, tick % kBeatsPerMeasure));
+    }
+    return result;
+}
+
+void ScoreDocument::setBeatAt(std::size_t tickIndex, std::string value) {
+    setBeat(tickIndex / kBeatsPerMeasure, tickIndex % kBeatsPerMeasure, std::move(value));
+}
+
+void ScoreDocument::insertBeat(std::size_t tickIndex, std::string value) {
+    const std::size_t used = std::max(contentBeatCount(), tickIndex);
+    for (std::size_t tick = used; tick > tickIndex; --tick) {
+        setBeatAt(tick, beat((tick - 1) / kBeatsPerMeasure,
+                             (tick - 1) % kBeatsPerMeasure));
+    }
+    setBeatAt(tickIndex, std::move(value));
+}
+
+void ScoreDocument::insertBeats(std::size_t tickIndex, const std::vector<std::string>& values) {
+    if (values.empty()) {
+        return;
+    }
+    for (std::size_t index = 0; index < values.size(); ++index) {
+        insertBeat(tickIndex + index, values[index]);
+    }
+}
+
+void ScoreDocument::eraseBeats(std::size_t startTick, std::size_t count) {
+    if (count == 0) {
+        return;
+    }
+    const std::size_t used = contentBeatCount();
+    if (startTick >= used) {
+        return;
+    }
+    const std::size_t endTick = std::min(used, startTick + count);
+    const std::size_t removed = endTick - startTick;
+    for (std::size_t tick = startTick; tick + removed < used; ++tick) {
+        setBeatAt(tick, beat((tick + removed) / kBeatsPerMeasure,
+                             (tick + removed) % kBeatsPerMeasure));
+    }
+    for (std::size_t tick = used - removed; tick < used; ++tick) {
+        clearBeat(tick / kBeatsPerMeasure, tick % kBeatsPerMeasure);
+    }
+}
+
+void ScoreDocument::clearBeats(std::size_t startTick, std::size_t count) {
+    for (std::size_t offset = 0; offset < count; ++offset) {
+        const std::size_t tick = startTick + offset;
+        clearBeat(tick / kBeatsPerMeasure, tick % kBeatsPerMeasure);
+    }
+}
+
+std::size_t ScoreDocument::contentBeatCount() const noexcept {
+    for (std::size_t measureIndex = measures_.size(); measureIndex > 0; --measureIndex) {
+        const auto& current = measures_[measureIndex - 1];
+        for (std::size_t beatIndex = kBeatsPerMeasure; beatIndex > 0; --beatIndex) {
+            if (!current.beats[beatIndex - 1].empty()) {
+                return (measureIndex - 1) * kBeatsPerMeasure + beatIndex;
+            }
+        }
+    }
+    return 0;
 }
 
 }  // namespace yuanqin::ui

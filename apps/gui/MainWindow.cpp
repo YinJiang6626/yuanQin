@@ -4,6 +4,7 @@
 #include "yuanqin/playback/GenshinWindowTarget.h"
 #include "yuanqin/playback/MusicPlayer.h"
 #include "yuanqin/playback/VirtualHidKeySender.h"
+#include "yuanqin/playback/WindowsApiKeySender.h"
 
 #include <commdlg.h>
 #include <windowsx.h>
@@ -28,6 +29,13 @@ constexpr int kHeaderHeight = 160;
 constexpr int kFooterHeight = 86;
 constexpr int kEditorControlId = 1001;
 constexpr int kBpmControlId = 1002;
+constexpr int kOutputBackendControlId = 1003;
+constexpr int kBpmCorrectionControlId = 1004;
+constexpr int kSidebarCollapsedWidth = 62;
+constexpr int kSidebarExpandedWidth = 132;
+constexpr int kSettingsHeaderHeight = 108;
+constexpr int kSettingsContentHeight = 590;
+constexpr std::array<int, 5> kBpmCorrections{1, 2, 4, 8, 32};
 constexpr UINT kPlaybackProgressMessage = WM_APP + 11;
 constexpr UINT kPlaybackCompleteMessage = WM_APP + 12;
 
@@ -62,6 +70,61 @@ void drawDiamond(HDC context, int centerX, int centerY, int radius, COLORREF col
     SelectObject(context, oldPen);
     SelectObject(context, oldBrush);
     DeleteObject(brush);
+}
+
+void drawGearIcon(HDC context, const RECT& bounds, COLORREF color) {
+    const int centerX = (bounds.left + bounds.right) / 2;
+    const int centerY = (bounds.top + bounds.bottom) / 2;
+    const int innerRadius = 9;
+    const int outerRadius = 15;
+    const HPEN pen = CreatePen(PS_SOLID, 2, color);
+    const auto oldPen = SelectObject(context, pen);
+    const auto oldBrush = SelectObject(context, GetStockObject(NULL_BRUSH));
+    Ellipse(context, centerX - innerRadius, centerY - innerRadius,
+            centerX + innerRadius, centerY + innerRadius);
+    Ellipse(context, centerX - 3, centerY - 3, centerX + 4, centerY + 4);
+    for (int index = 0; index < 8; ++index) {
+        const double angle = static_cast<double>(index) * 3.14159265358979323846 / 4.0;
+        MoveToEx(context,
+                 centerX + static_cast<int>(std::lround(std::cos(angle) * innerRadius)),
+                 centerY + static_cast<int>(std::lround(std::sin(angle) * innerRadius)), nullptr);
+        LineTo(context,
+               centerX + static_cast<int>(std::lround(std::cos(angle) * outerRadius)),
+               centerY + static_cast<int>(std::lround(std::sin(angle) * outerRadius)));
+    }
+    SelectObject(context, oldBrush);
+    SelectObject(context, oldPen);
+    DeleteObject(pen);
+}
+
+void drawWorkspaceIcon(HDC context, const RECT& bounds, COLORREF color) {
+    const int centerX = (bounds.left + bounds.right) / 2;
+    const int centerY = (bounds.top + bounds.bottom) / 2;
+    const RECT sheet{centerX - 12, centerY - 15, centerX + 13, centerY + 16};
+    const HPEN pen = CreatePen(PS_SOLID, 2, color);
+    const auto oldPen = SelectObject(context, pen);
+    const auto oldBrush = SelectObject(context, GetStockObject(NULL_BRUSH));
+    RoundRect(context, sheet.left, sheet.top, sheet.right, sheet.bottom, 4, 4);
+    for (int offset = -7; offset <= 7; offset += 7) {
+        MoveToEx(context, centerX - 7, centerY + offset, nullptr);
+        LineTo(context, centerX + 8, centerY + offset);
+    }
+    SelectObject(context, oldBrush);
+    SelectObject(context, oldPen);
+    DeleteObject(pen);
+}
+
+void drawSidebarChevron(HDC context, const RECT& bounds, bool expanded, COLORREF color) {
+    const int centerX = (bounds.left + bounds.right) / 2;
+    const int centerY = (bounds.top + bounds.bottom) / 2;
+    const int direction = expanded ? -1 : 1;
+    const HPEN pen = CreatePen(PS_SOLID, 2, color);
+    const auto oldPen = SelectObject(context, pen);
+    MoveToEx(context, centerX - direction * 4, centerY - 7, nullptr);
+    LineTo(context, centerX + direction * 3, centerY);
+    LineTo(context, centerX - direction * 4, centerY + 7);
+    SelectObject(context, oldPen);
+    DeleteObject(pen);
 }
 
 std::wstring fileNameFor(const std::filesystem::path& path) {
@@ -148,6 +211,17 @@ bool MainWindow::processShortcut(const MSG& message) {
         return false;
     }
 
+    if (GetFocus() == editor_.handle()) {
+        if (message.wParam == 'Z') {
+            undoActiveDocument();
+            return true;
+        }
+        if (message.wParam == 'Y') {
+            redoActiveDocument();
+            return true;
+        }
+    }
+
     switch (message.wParam) {
         case 'N': invoke(ToolbarAction::NewFile); return true;
         case 'O': invoke(ToolbarAction::OpenFile); return true;
@@ -198,11 +272,45 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
                 return -1;
             }
             SendMessageW(bpmEdit_, WM_SETFONT, reinterpret_cast<WPARAM>(interfaceFont_), TRUE);
+            bpmCorrectionCombo_ = CreateWindowExW(
+                0, L"COMBOBOX", L"",
+                WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST,
+                0, 0, 0, 0, window_,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kBpmCorrectionControlId)),
+                instance_, nullptr);
+            if (!bpmCorrectionCombo_) {
+                return -1;
+            }
+            SendMessageW(bpmCorrectionCombo_, WM_SETFONT,
+                         reinterpret_cast<WPARAM>(interfaceFont_), TRUE);
+            for (const wchar_t* multiplier : {L"×1", L"×2", L"×4", L"×8", L"×32"}) {
+                SendMessageW(bpmCorrectionCombo_, CB_ADDSTRING, 0,
+                             reinterpret_cast<LPARAM>(multiplier));
+            }
+            SendMessageW(bpmCorrectionCombo_, CB_SETCURSEL, 0, 0);
+            outputBackendCombo_ = CreateWindowExW(
+                0, L"COMBOBOX", L"",
+                WS_CHILD | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST,
+                0, 0, 0, 0, window_,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kOutputBackendControlId)),
+                instance_, nullptr);
+            if (!outputBackendCombo_) {
+                return -1;
+            }
+            SendMessageW(outputBackendCombo_, WM_SETFONT,
+                         reinterpret_cast<WPARAM>(interfaceFont_), TRUE);
+            SendMessageW(outputBackendCombo_, CB_ADDSTRING, 0,
+                         reinterpret_cast<LPARAM>(L"Windows API"));
+            SendMessageW(outputBackendCombo_, CB_ADDSTRING, 0,
+                         reinterpret_cast<LPARAM>(L"虚拟 HID 驱动"));
+            SendMessageW(outputBackendCombo_, CB_SETCURSEL, 0, 0);
             bpmEditBrush_ = CreateSolidBrush(RGB(232, 247, 249));
+            editor_.setBeforeChangeCallback([this] { recordActiveDocumentHistory(); });
             editor_.setChangedCallback([this] { markActiveDocumentChanged(); });
             editor_.setSelectionChangedCallback(
                 [this](std::size_t tickIndex) { onEditorSelectionChanged(tickIndex); });
             newDocument();
+            updatePageVisibility();
             layoutChildren();
             return 0;
 
@@ -217,7 +325,30 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
 
         case WM_COMMAND:
             if (LOWORD(wParam) == kBpmControlId && HIWORD(wParam) == EN_CHANGE) {
+                if (!updatingBpmEdit_ && activeDocument_ < documents_.size()) {
+                    wchar_t value[32]{};
+                    GetWindowTextW(bpmEdit_, value, static_cast<int>(std::size(value)));
+                    documents_[activeDocument_].bpmText = value;
+                }
                 InvalidateRect(window_, nullptr, FALSE);
+                return 0;
+            }
+            if (LOWORD(wParam) == kBpmCorrectionControlId &&
+                HIWORD(wParam) == CBN_SELCHANGE) {
+                updateBpmCorrectionFromControl();
+                return 0;
+            }
+            if (LOWORD(wParam) == kOutputBackendControlId &&
+                HIWORD(wParam) == CBN_SELCHANGE) {
+                updateOutputBackendFromControl();
+                return 0;
+            }
+            break;
+
+        case WM_MOUSEWHEEL:
+            if (activePage_ == Page::SystemSettings) {
+                const int steps = GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA;
+                scrollSettingsBy(-steps * 54);
                 return 0;
             }
             break;
@@ -237,21 +368,22 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
             return 1;
 
         case WM_MOUSEACTIVATE: {
-            if (LOWORD(lParam) == HTCAPTION) {
-                const HWND gameWindow = playback::GenshinWindowTarget::find();
-                if (playbackRunning_ ||
-                    (gameWindow && GetForegroundWindow() == gameWindow)) {
+            const HWND gameWindow = playback::GenshinWindowTarget::find();
+            const bool preserveGameFocus = playbackRunning_ ||
+                (gameWindow && GetForegroundWindow() == gameWindow);
+            if (preserveGameFocus) {
+                if (LOWORD(lParam) == HTCAPTION) {
                     return MA_NOACTIVATE;
                 }
-            }
-            POINT cursor{};
-            if (GetCursorPos(&cursor)) {
-                ScreenToClient(window_, &cursor);
-                if (shouldHandleWithoutActivation(cursor)) {
-                    // Playback controls must remain usable while an exclusive-fullscreen
-                    // game owns the foreground window. The click is delivered, but this
-                    // overlay does not become active and therefore does not minimize it.
-                    return MA_NOACTIVATE;
+                POINT cursor{};
+                if (GetCursorPos(&cursor)) {
+                    ScreenToClient(window_, &cursor);
+                    if (shouldHandleWithoutActivation(cursor)) {
+                        // Playback controls must remain usable while an exclusive-fullscreen
+                        // game owns the foreground window. The click is delivered, but this
+                        // overlay does not become active and therefore does not minimize it.
+                        return MA_NOACTIVATE;
+                    }
                 }
             }
             break;
@@ -262,7 +394,35 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
             return 0;
 
         case WM_LBUTTONDOWN: {
-            const POINT point{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+            const POINT windowPoint{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+            const RECT settingsButton = sidebarSettingsBounds();
+            const RECT workspaceButton = sidebarWorkspaceBounds();
+            const RECT sidebarToggle = sidebarToggleBounds();
+            if (PtInRect(&settingsButton, windowPoint)) {
+                setActivePage(Page::SystemSettings);
+                return 0;
+            }
+            if (PtInRect(&workspaceButton, windowPoint)) {
+                setActivePage(Page::Workspace);
+                return 0;
+            }
+            if (PtInRect(&sidebarToggle, windowPoint)) {
+                toggleSidebar();
+                return 0;
+            }
+
+            if (activePage_ == Page::SystemSettings) {
+                const RECT scrollBar = settingsScrollbarBounds();
+                if (PtInRect(&scrollBar, windowPoint) && maximumSettingsScroll() > 0) {
+                    draggingSettingsScroll_ = true;
+                    setSettingsScrollFromY(windowPoint.y);
+                    SetCapture(window_);
+                }
+                return 0;
+            }
+
+            POINT point = windowPoint;
+            point.x -= sidebarWidth();
             RECT opacity = opacityBounds();
             RECT opacityHit = opacity;
             InflateRect(&opacityHit, 0, 12);
@@ -294,6 +454,11 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
                 InvalidateRect(window_, nullptr, FALSE);
                 return 0;
             }
+            const RECT editModeToggle = editModeToggleBounds();
+            if (PtInRect(&editModeToggle, point)) {
+                toggleInsertMode();
+                return 0;
+            }
             for (const auto& item : toolbarItems()) {
                 if (PtInRect(&item.bounds, point)) {
                     invoke(item.action);
@@ -323,6 +488,10 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
         }
 
         case WM_MOUSEMOVE:
+            if (draggingSettingsScroll_) {
+                setSettingsScrollFromY(GET_Y_LPARAM(lParam));
+                return 0;
+            }
             if (draggingWindow_) {
                 POINT cursor{};
                 if (GetCursorPos(&cursor)) {
@@ -336,11 +505,11 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
                 return 0;
             }
             if (draggingOpacity_) {
-                setWindowOpacityFromX(GET_X_LPARAM(lParam));
+                setWindowOpacityFromX(GET_X_LPARAM(lParam) - sidebarWidth());
                 return 0;
             }
             if (draggingProgress_) {
-                draggedTick_ = progressTickFromX(GET_X_LPARAM(lParam));
+                draggedTick_ = progressTickFromX(GET_X_LPARAM(lParam) - sidebarWidth());
                 editor_.setPlayheadTick(draggedTick_, false);
                 InvalidateRect(window_, nullptr, FALSE);
                 return 0;
@@ -348,19 +517,25 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
             break;
 
         case WM_LBUTTONUP:
+            if (draggingSettingsScroll_) {
+                draggingSettingsScroll_ = false;
+                setSettingsScrollFromY(GET_Y_LPARAM(lParam));
+                ReleaseCapture();
+                return 0;
+            }
             if (draggingWindow_) {
                 draggingWindow_ = false;
                 ReleaseCapture();
                 return 0;
             }
             if (draggingOpacity_) {
-                setWindowOpacityFromX(GET_X_LPARAM(lParam));
+                setWindowOpacityFromX(GET_X_LPARAM(lParam) - sidebarWidth());
                 draggingOpacity_ = false;
                 ReleaseCapture();
                 return 0;
             }
             if (draggingProgress_) {
-                draggedTick_ = progressTickFromX(GET_X_LPARAM(lParam));
+                draggedTick_ = progressTickFromX(GET_X_LPARAM(lParam) - sidebarWidth());
                 draggingProgress_ = false;
                 ReleaseCapture();
                 seekTo(draggedTick_, dragWasPlaying_);
@@ -371,6 +546,7 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
         case WM_CAPTURECHANGED:
             draggingWindow_ = false;
             draggingOpacity_ = false;
+            draggingSettingsScroll_ = false;
             if (draggingProgress_) {
                 draggingProgress_ = false;
                 seekTo(draggedTick_, dragWasPlaying_);
@@ -435,37 +611,51 @@ void MainWindow::destroyFonts() {
 }
 
 void MainWindow::layoutChildren() {
-    if (!window_ || !editor_.handle() || !bpmEdit_) {
+    if (!window_ || !editor_.handle() || !bpmEdit_ || !bpmCorrectionCombo_ ||
+        !outputBackendCombo_) {
         return;
     }
     RECT client{};
     GetClientRect(window_, &client);
-    MoveWindow(editor_.handle(), 0, kHeaderHeight, client.right,
+    settingsScrollOffset_ = std::clamp(settingsScrollOffset_, 0, maximumSettingsScroll());
+    const int sidebar = sidebarWidth();
+    const int contentWidth = std::max(0, static_cast<int>(client.right) - sidebar);
+    MoveWindow(editor_.handle(), sidebar, kHeaderHeight, contentWidth,
                std::max(0, static_cast<int>(client.bottom) - kHeaderHeight - kFooterHeight), TRUE);
-    MoveWindow(bpmEdit_, 178, client.bottom - kFooterHeight + 43, 54, 27, TRUE);
+    MoveWindow(bpmEdit_, sidebar + 178, client.bottom - kFooterHeight + 43, 54, 27, TRUE);
+    MoveWindow(bpmCorrectionCombo_, sidebar + 284, client.bottom - kFooterHeight + 43, 78, 220, TRUE);
+
+    const int settingsCardTop = kSettingsHeaderHeight + 28 - settingsScrollOffset_;
+    MoveWindow(outputBackendCombo_, sidebar + 64, settingsCardTop + 92,
+               std::min(330, std::max(190, contentWidth - 128)), 220, TRUE);
+    updatePageVisibility();
 }
 
 RECT MainWindow::playPauseBounds() const {
     RECT client{};
     GetClientRect(window_, &client);
+    client.right = std::max<LONG>(0, client.right - sidebarWidth());
     return {25, client.bottom - kFooterHeight + 36, 67, client.bottom - 10};
 }
 
 RECT MainWindow::playFromBeginningBounds() const {
     RECT client{};
     GetClientRect(window_, &client);
+    client.right = std::max<LONG>(0, client.right - sidebarWidth());
     return {75, client.bottom - kFooterHeight + 36, 117, client.bottom - 10};
 }
 
 RECT MainWindow::progressBounds() const {
     RECT client{};
     GetClientRect(window_, &client);
-    return {264, client.bottom - 36, std::max(284L, client.right - 92), client.bottom - 28};
+    client.right = std::max<LONG>(0, client.right - sidebarWidth());
+    return {392, client.bottom - 36, std::max(412L, client.right - 92), client.bottom - 28};
 }
 
 RECT MainWindow::opacityBounds() const {
     RECT client{};
     GetClientRect(window_, &client);
+    client.right = std::max<LONG>(0, client.right - sidebarWidth());
     const LONG footerTop = client.bottom - kFooterHeight;
     return {std::max(430L, client.right - 170), footerTop + 13,
             client.right - 28, footerTop + 19};
@@ -474,20 +664,120 @@ RECT MainWindow::opacityBounds() const {
 RECT MainWindow::headerDragBounds() const {
     RECT client{};
     GetClientRect(window_, &client);
+    client.right = std::max<LONG>(0, client.right - sidebarWidth());
     return {18, 76, std::max(19L, client.right - 18), 104};
 }
 
+RECT MainWindow::editModeToggleBounds() const {
+    const auto items = toolbarItems();
+    if (items.empty()) {
+        return {0, 0, 0, 0};
+    }
+    const RECT saveAs = items.back().bounds;
+    return {saveAs.left, saveAs.bottom + 5, saveAs.right, saveAs.bottom + 31};
+}
+
+int MainWindow::sidebarWidth() const noexcept {
+    return sidebarExpanded_ ? kSidebarExpandedWidth : kSidebarCollapsedWidth;
+}
+
+RECT MainWindow::sidebarSettingsBounds() const {
+    return {9, 16, sidebarWidth() - 9, 66};
+}
+
+RECT MainWindow::sidebarWorkspaceBounds() const {
+    return {9, 76, sidebarWidth() - 9, 126};
+}
+
+RECT MainWindow::sidebarToggleBounds() const {
+    RECT client{};
+    GetClientRect(window_, &client);
+    return {9, std::max(136L, client.bottom - 58), sidebarWidth() - 9,
+            std::max(178L, client.bottom - 14)};
+}
+
+RECT MainWindow::settingsViewportBounds() const {
+    RECT client{};
+    GetClientRect(window_, &client);
+    return {sidebarWidth(), kSettingsHeaderHeight, client.right, client.bottom};
+}
+
+int MainWindow::maximumSettingsScroll() const {
+    const RECT viewport = settingsViewportBounds();
+    return std::max(0, kSettingsContentHeight -
+                           std::max(0, static_cast<int>(viewport.bottom - viewport.top)));
+}
+
+RECT MainWindow::settingsScrollbarBounds() const {
+    const RECT viewport = settingsViewportBounds();
+    return {std::max(viewport.left, viewport.right - 16), viewport.top + 14,
+            std::max(viewport.left, viewport.right - 8), viewport.bottom - 14};
+}
+
+RECT MainWindow::settingsScrollThumbBounds() const {
+    const RECT track = settingsScrollbarBounds();
+    const int trackHeight = std::max(1L, track.bottom - track.top);
+    const RECT viewport = settingsViewportBounds();
+    const int viewportHeight = std::max(1L, viewport.bottom - viewport.top);
+    const int thumbHeight = std::clamp(
+        static_cast<int>(std::lround(static_cast<double>(trackHeight) * viewportHeight /
+                                     std::max(viewportHeight, kSettingsContentHeight))),
+        42, trackHeight);
+    const int maximum = maximumSettingsScroll();
+    const int travel = std::max(0, trackHeight - thumbHeight);
+    const int top = track.top + (maximum == 0 ? 0 :
+        static_cast<int>(std::lround(static_cast<double>(travel) * settingsScrollOffset_ /
+                                     maximum)));
+    return {track.left, top, track.right, top + thumbHeight};
+}
+
+void MainWindow::scrollSettingsBy(int delta) {
+    settingsScrollOffset_ = std::clamp(settingsScrollOffset_ + delta,
+                                       0, maximumSettingsScroll());
+    layoutChildren();
+    InvalidateRect(window_, nullptr, FALSE);
+}
+
+void MainWindow::setSettingsScrollFromY(int y) {
+    const RECT track = settingsScrollbarBounds();
+    const RECT thumb = settingsScrollThumbBounds();
+    const int travel = std::max(1L, (track.bottom - track.top) - (thumb.bottom - thumb.top));
+    const int rawPosition = y - static_cast<int>(track.top) -
+                            static_cast<int>((thumb.bottom - thumb.top) / 2);
+    const int position = std::clamp(rawPosition, 0, travel);
+    settingsScrollOffset_ = maximumSettingsScroll() == 0 ? 0 :
+        static_cast<int>(std::lround(static_cast<double>(position) *
+                                     maximumSettingsScroll() / travel));
+    layoutChildren();
+    InvalidateRect(window_, nullptr, FALSE);
+}
+
 bool MainWindow::shouldHandleWithoutActivation(POINT clientPoint) const {
+    const RECT settingsButton = sidebarSettingsBounds();
+    const RECT workspaceButton = sidebarWorkspaceBounds();
+    const RECT toggleButton = sidebarToggleBounds();
+    if (PtInRect(&settingsButton, clientPoint) || PtInRect(&workspaceButton, clientPoint) ||
+        PtInRect(&toggleButton, clientPoint)) {
+        return true;
+    }
+    if (activePage_ == Page::SystemSettings) {
+        return true;
+    }
+
+    POINT workspacePoint = clientPoint;
+    workspacePoint.x -= sidebarWidth();
     RECT playPause = playPauseBounds();
     RECT fromBeginning = playFromBeginningBounds();
     RECT progress = progressBounds();
     RECT opacity = opacityBounds();
     const RECT headerDrag = headerDragBounds();
+    RECT editModeToggle = editModeToggleBounds();
     InflateRect(&progress, 0, 12);
     InflateRect(&opacity, 0, 12);
-    if (PtInRect(&headerDrag, clientPoint) || PtInRect(&playPause, clientPoint) ||
-        PtInRect(&fromBeginning, clientPoint) ||
-        PtInRect(&progress, clientPoint) || PtInRect(&opacity, clientPoint)) {
+    if (PtInRect(&headerDrag, workspacePoint) || PtInRect(&playPause, workspacePoint) ||
+        PtInRect(&fromBeginning, workspacePoint) ||
+        PtInRect(&progress, workspacePoint) || PtInRect(&opacity, workspacePoint) ||
+        PtInRect(&editModeToggle, workspacePoint)) {
         return true;
     }
 
@@ -513,6 +803,7 @@ bool MainWindow::shouldHandleWithoutActivation(POINT clientPoint) const {
 std::vector<MainWindow::ToolbarItem> MainWindow::toolbarItems() const {
     RECT client{};
     GetClientRect(window_, &client);
+    client.right = std::max<LONG>(0, client.right - sidebarWidth());
     struct Definition { ToolbarAction action; const wchar_t* label; int width; };
     constexpr Definition definitions[]{{ToolbarAction::NewFile, L"＋ 新建", 84},
                                         {ToolbarAction::OpenFile, L"打开", 78},
@@ -539,6 +830,7 @@ std::vector<MainWindow::TabItem> MainWindow::tabItems() const {
     }
     RECT client{};
     GetClientRect(window_, &client);
+    client.right = std::max<LONG>(0, client.right - sidebarWidth());
     const int available = std::max(200, static_cast<int>(client.right) - 64);
     const int width = std::clamp(available / static_cast<int>(documents_.size()), 118, 218);
     int x = 30;
@@ -557,16 +849,33 @@ std::vector<MainWindow::TabItem> MainWindow::tabItems() const {
 void MainWindow::paint() {
     PAINTSTRUCT paintStruct{};
     const HDC windowContext = BeginPaint(window_, &paintStruct);
-    RECT client{};
-    GetClientRect(window_, &client);
+    RECT windowClient{};
+    GetClientRect(window_, &windowClient);
     const HDC context = CreateCompatibleDC(windowContext);
-    const HBITMAP bitmap = CreateCompatibleBitmap(windowContext, std::max(1L, client.right),
-                                                   std::max(1L, client.bottom));
+    const HBITMAP bitmap = CreateCompatibleBitmap(windowContext, std::max(1L, windowClient.right),
+                                                   std::max(1L, windowClient.bottom));
     const auto oldBitmap = SelectObject(context, bitmap);
 
     const HBRUSH background = CreateSolidBrush(kSilver);
-    FillRect(context, &client, background);
+    FillRect(context, &windowClient, background);
     DeleteObject(background);
+
+    if (activePage_ == Page::SystemSettings) {
+        paintSettingsPage(context, windowClient);
+        paintSidebar(context, windowClient);
+        BitBlt(windowContext, 0, 0, windowClient.right, windowClient.bottom,
+               context, 0, 0, SRCCOPY);
+        SelectObject(context, oldBitmap);
+        DeleteObject(bitmap);
+        DeleteDC(context);
+        EndPaint(window_, &paintStruct);
+        return;
+    }
+
+    RECT client{0, 0, std::max<LONG>(0, windowClient.right - sidebarWidth()),
+                windowClient.bottom};
+    POINT previousOrigin{};
+    SetViewportOrgEx(context, sidebarWidth(), 0, &previousOrigin);
 
     TRIVERTEX vertices[2]{{0, 0, 0x1000, 0x5A00, 0x7300, 0},
                           {client.right, kHeaderHeight, 0x5200, 0xC900, 0xDA00, 0}};
@@ -607,6 +916,14 @@ void MainWindow::paint() {
         RECT text = item.bounds;
         DrawTextW(context, item.label, -1, &text, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
+
+    RECT editModeToggle = editModeToggleBounds();
+    fillRoundedRect(context, editModeToggle, 9,
+                    insertMode_ ? RGB(231, 224, 249) : RGB(220, 244, 245));
+    SelectObject(context, smallFont_);
+    SetTextColor(context, insertMode_ ? RGB(83, 71, 139) : kDeepTeal);
+    DrawTextW(context, insertMode_ ? L"插入" : L"替换", -1, &editModeToggle,
+              DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
     for (const auto& item : tabItems()) {
         const bool active = item.index == activeDocument_;
@@ -709,6 +1026,9 @@ void MainWindow::paint() {
     SetTextColor(context, RGB(184, 226, 231));
     RECT bpmLabel{131, footer.top + 40, 174, footer.bottom - 10};
     DrawTextW(context, L"BPM", -1, &bpmLabel, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+    RECT correctionLabel{236, footer.top + 40, 278, footer.bottom - 10};
+    DrawTextW(context, L"补正", -1, &correctionLabel,
+              DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
     const RECT progress = progressBounds();
     RECT progressTrack = progress;
@@ -743,16 +1063,293 @@ void MainWindow::paint() {
     DrawTextW(context, timeText.c_str(), -1, &timeRect,
               DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
-    BitBlt(windowContext, 0, 0, client.right, client.bottom, context, 0, 0, SRCCOPY);
+    SetViewportOrgEx(context, previousOrigin.x, previousOrigin.y, nullptr);
+    paintSidebar(context, windowClient);
+    BitBlt(windowContext, 0, 0, windowClient.right, windowClient.bottom,
+           context, 0, 0, SRCCOPY);
     SelectObject(context, oldBitmap);
     DeleteObject(bitmap);
     DeleteDC(context);
     EndPaint(window_, &paintStruct);
 }
 
+void MainWindow::paintSidebar(HDC context, const RECT& client) {
+    const RECT sidebar{0, 0, sidebarWidth(), client.bottom};
+    const HBRUSH background = CreateSolidBrush(RGB(14, 57, 76));
+    FillRect(context, &sidebar, background);
+    DeleteObject(background);
+
+    const RECT edge{sidebar.right - 2, 0, sidebar.right, client.bottom};
+    const HBRUSH edgeBrush = CreateSolidBrush(RGB(87, 189, 202));
+    FillRect(context, &edge, edgeBrush);
+    DeleteObject(edgeBrush);
+
+    const RECT settings = sidebarSettingsBounds();
+    const RECT workspace = sidebarWorkspaceBounds();
+    const RECT toggle = sidebarToggleBounds();
+    if (activePage_ == Page::SystemSettings) {
+        fillRoundedRect(context, settings, 15, RGB(61, 139, 160));
+    }
+    if (activePage_ == Page::Workspace) {
+        fillRoundedRect(context, workspace, 15, RGB(61, 139, 160));
+    }
+
+    RECT settingsIcon = settings;
+    RECT workspaceIcon = workspace;
+    if (sidebarExpanded_) {
+        settingsIcon.right = settingsIcon.left + 50;
+        workspaceIcon.right = workspaceIcon.left + 50;
+    }
+    drawGearIcon(context, settingsIcon,
+                 activePage_ == Page::SystemSettings ? RGB(238, 235, 251)
+                                                     : RGB(171, 220, 226));
+    drawWorkspaceIcon(context, workspaceIcon,
+                      activePage_ == Page::Workspace ? RGB(238, 235, 251)
+                                                     : RGB(171, 220, 226));
+
+    fillRoundedRect(context, toggle, 12, RGB(25, 82, 101));
+    drawSidebarChevron(context, toggle, sidebarExpanded_, RGB(177, 224, 230));
+
+    if (sidebarExpanded_) {
+        SelectObject(context, smallFont_);
+        SetTextColor(context, RGB(232, 250, 251));
+        RECT settingsText{settings.left + 52, settings.top, settings.right - 8, settings.bottom};
+        RECT workspaceText{workspace.left + 52, workspace.top, workspace.right - 8, workspace.bottom};
+        DrawTextW(context, L"设置", -1, &settingsText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextW(context, L"编辑", -1, &workspaceText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    }
+}
+
+void MainWindow::paintSettingsPage(HDC context, const RECT& client) {
+    const int left = sidebarWidth();
+    TRIVERTEX vertices[2]{{left, 0, 0x1000, 0x5A00, 0x7300, 0},
+                          {client.right, kSettingsHeaderHeight, 0x5200, 0xC900, 0xDA00, 0}};
+    GRADIENT_RECT gradient{0, 1};
+    GradientFill(context, vertices, 2, &gradient, 1, GRADIENT_FILL_RECT_H);
+    SetBkMode(context, TRANSPARENT);
+
+    SelectObject(context, titleFont_);
+    SetTextColor(context, kWhite);
+    RECT title{left + 38, 20, client.right - 36, 58};
+    DrawTextW(context, L"系统设置", -1, &title, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    SelectObject(context, subtitleFont_);
+    SetTextColor(context, RGB(205, 244, 246));
+    RECT subtitle{left + 40, 59, client.right - 36, 83};
+    DrawTextW(context, L"SYSTEM SETTINGS  ·  输出与应用配置", -1, &subtitle,
+              DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+    const RECT viewport = settingsViewportBounds();
+    const int saved = SaveDC(context);
+    IntersectClipRect(context, viewport.left, viewport.top, viewport.right, viewport.bottom);
+
+    const int cardLeft = left + 36;
+    const int cardRight = std::max(cardLeft + 320, static_cast<int>(client.right) - 38);
+    const int outputTop = kSettingsHeaderHeight + 28 - settingsScrollOffset_;
+    const RECT outputCard{cardLeft, outputTop, cardRight, outputTop + 206};
+    fillRoundedRect(context, outputCard, 18, RGB(248, 252, 254));
+    const RECT outputAccent{outputCard.left, outputCard.top, outputCard.left + 6, outputCard.bottom};
+    fillRoundedRect(context, outputAccent, 6, kLavender);
+
+    SelectObject(context, interfaceFont_);
+    SetTextColor(context, kDeepTeal);
+    RECT outputTitle{outputCard.left + 28, outputCard.top + 22,
+                     outputCard.right - 24, outputCard.top + 50};
+    DrawTextW(context, L"输出方式", -1, &outputTitle,
+              DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    SelectObject(context, smallFont_);
+    SetTextColor(context, kMuted);
+    RECT outputHelp{outputCard.left + 28, outputCard.top + 50,
+                    outputCard.right - 24, outputCard.top + 82};
+    DrawTextW(context, L"选择播放时使用的按键输出后端。切换后对所有乐谱生效。", -1,
+              &outputHelp, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+    const wchar_t* backendDescription = outputBackend_ == OutputBackend::WindowsApi
+        ? L"Windows API：沿用旧版本的扫描码 SendInput 输出，无需安装驱动。"
+        : L"虚拟 HID 驱动：通过 YuanqinVhid 设备提交标准键盘报告，需要安装并启动驱动。";
+    SetTextColor(context, RGB(73, 116, 132));
+    RECT backendHelp{outputCard.left + 28, outputCard.top + 140,
+                     outputCard.right - 24, outputCard.bottom - 18};
+    DrawTextW(context, backendDescription, -1, &backendHelp,
+              DT_LEFT | DT_TOP | DT_WORDBREAK | DT_END_ELLIPSIS);
+
+    const int infoTop = outputCard.bottom + 24;
+    const RECT infoCard{cardLeft, infoTop, cardRight, infoTop + 190};
+    fillRoundedRect(context, infoCard, 18, RGB(236, 247, 249));
+    SelectObject(context, interfaceFont_);
+    SetTextColor(context, RGB(54, 103, 121));
+    RECT infoTitle{infoCard.left + 28, infoCard.top + 20,
+                   infoCard.right - 24, infoCard.top + 50};
+    DrawTextW(context, L"输出说明", -1, &infoTitle,
+              DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    SelectObject(context, smallFont_);
+    SetTextColor(context, kMuted);
+    RECT infoText{infoCard.left + 28, infoCard.top + 57,
+                  infoCard.right - 28, infoCard.bottom - 22};
+    DrawTextW(context,
+              L"Windows API 与驱动版本共享同一套播放、暂停、跳转和进度逻辑。"
+              L"输出方式只决定最终按键由 SendInput 还是虚拟 HID 设备产生。系统设置页已预留纵向扩展与滚动区域。",
+              -1, &infoText, DT_LEFT | DT_TOP | DT_WORDBREAK);
+
+    RestoreDC(context, saved);
+
+    if (maximumSettingsScroll() > 0) {
+        const RECT track = settingsScrollbarBounds();
+        const RECT thumb = settingsScrollThumbBounds();
+        fillRoundedRect(context, track, 8, RGB(205, 224, 230));
+        fillRoundedRect(context, thumb, 8, RGB(91, 170, 188));
+    }
+}
+
+void MainWindow::setActivePage(Page page) {
+    if (activePage_ == page) {
+        return;
+    }
+    if (playbackRunning_) {
+        stopPlayback();
+    }
+    activePage_ = page;
+    updatePageVisibility();
+    layoutChildren();
+    InvalidateRect(window_, nullptr, FALSE);
+}
+
+void MainWindow::toggleSidebar() {
+    sidebarExpanded_ = !sidebarExpanded_;
+    layoutChildren();
+    InvalidateRect(window_, nullptr, FALSE);
+}
+
+void MainWindow::updatePageVisibility() {
+    if (!editor_.handle() || !bpmEdit_ || !bpmCorrectionCombo_ || !outputBackendCombo_) {
+        return;
+    }
+    const bool workspaceVisible = activePage_ == Page::Workspace;
+    ShowWindow(editor_.handle(), workspaceVisible ? SW_SHOW : SW_HIDE);
+    ShowWindow(bpmEdit_, workspaceVisible ? SW_SHOW : SW_HIDE);
+    ShowWindow(bpmCorrectionCombo_, workspaceVisible ? SW_SHOW : SW_HIDE);
+    ShowWindow(outputBackendCombo_, workspaceVisible ? SW_HIDE : SW_SHOW);
+}
+
+void MainWindow::syncBpmEditor() {
+    syncTempoControls();
+}
+
+void MainWindow::syncTempoControls() {
+    if (!bpmEdit_ || !bpmCorrectionCombo_ || activeDocument_ >= documents_.size()) {
+        return;
+    }
+    updatingBpmEdit_ = true;
+    updatingTempoControls_ = true;
+    SetWindowTextW(bpmEdit_, documents_[activeDocument_].bpmText.c_str());
+    const auto correction = documents_[activeDocument_].bpmCorrection;
+    const auto match = std::find(kBpmCorrections.begin(), kBpmCorrections.end(), correction);
+    const LRESULT selection = match == kBpmCorrections.end()
+        ? 0
+        : static_cast<LRESULT>(std::distance(kBpmCorrections.begin(), match));
+    SendMessageW(bpmCorrectionCombo_, CB_SETCURSEL, selection, 0);
+    updatingTempoControls_ = false;
+    updatingBpmEdit_ = false;
+}
+
+void MainWindow::updateOutputBackendFromControl() {
+    if (!outputBackendCombo_) {
+        return;
+    }
+    if (playbackRunning_) {
+        stopPlayback();
+    }
+    const LRESULT selection = SendMessageW(outputBackendCombo_, CB_GETCURSEL, 0, 0);
+    outputBackend_ = selection == 0 ? OutputBackend::WindowsApi : OutputBackend::VirtualHid;
+    setStatus(outputBackend_ == OutputBackend::WindowsApi
+                  ? L"输出方式已切换为 Windows API"
+                  : L"输出方式已切换为虚拟 HID 驱动");
+    InvalidateRect(window_, nullptr, FALSE);
+}
+
+void MainWindow::updateBpmCorrectionFromControl() {
+    if (updatingTempoControls_ || !bpmCorrectionCombo_ || activeDocument_ >= documents_.size()) {
+        return;
+    }
+    const LRESULT selection = SendMessageW(bpmCorrectionCombo_, CB_GETCURSEL, 0, 0);
+    const std::size_t index = selection >= 0
+        ? std::min<std::size_t>(static_cast<std::size_t>(selection), kBpmCorrections.size() - 1)
+        : 0;
+    documents_[activeDocument_].bpmCorrection = kBpmCorrections[index];
+    setStatus(L"BPM 补正已设为 ×" + std::to_wstring(kBpmCorrections[index]));
+    InvalidateRect(window_, nullptr, FALSE);
+}
+
+void MainWindow::recordActiveDocumentHistory() {
+    if (activeDocument_ >= documents_.size()) {
+        return;
+    }
+    auto& tab = documents_[activeDocument_];
+    tab.undoHistory.push_back({tab.document, editor_.selectionAnchorTick(), editor_.selectionCaretTick()});
+    if (tab.undoHistory.size() > 200) {
+        tab.undoHistory.erase(tab.undoHistory.begin());
+    }
+    tab.redoHistory.clear();
+}
+
+void MainWindow::undoActiveDocument() {
+    if (activeDocument_ >= documents_.size()) {
+        return;
+    }
+    auto& tab = documents_[activeDocument_];
+    if (tab.undoHistory.empty()) {
+        setStatus(L"没有可撤销的编辑操作");
+        return;
+    }
+    tab.redoHistory.push_back({tab.document, editor_.selectionAnchorTick(), editor_.selectionCaretTick()});
+    EditorSnapshot snapshot = std::move(tab.undoHistory.back());
+    tab.undoHistory.pop_back();
+    tab.document = std::move(snapshot.document);
+    tab.selectionAnchor = snapshot.selectionAnchor;
+    tab.selectionCaret = snapshot.selectionCaret;
+    tab.modified = tab.document.toText() != tab.savedText;
+    editor_.setDocument(&tab.document);
+    editor_.setSelectionRange(tab.selectionAnchor, tab.selectionCaret);
+    transportTick_ = tab.selectionCaret;
+    transportTotalTicks_ = activeScoreTickCount();
+    updateWindowTitle();
+    setStatus(L"已撤销");
+}
+
+void MainWindow::redoActiveDocument() {
+    if (activeDocument_ >= documents_.size()) {
+        return;
+    }
+    auto& tab = documents_[activeDocument_];
+    if (tab.redoHistory.empty()) {
+        setStatus(L"没有可恢复的编辑操作");
+        return;
+    }
+    tab.undoHistory.push_back({tab.document, editor_.selectionAnchorTick(), editor_.selectionCaretTick()});
+    EditorSnapshot snapshot = std::move(tab.redoHistory.back());
+    tab.redoHistory.pop_back();
+    tab.document = std::move(snapshot.document);
+    tab.selectionAnchor = snapshot.selectionAnchor;
+    tab.selectionCaret = snapshot.selectionCaret;
+    tab.modified = tab.document.toText() != tab.savedText;
+    editor_.setDocument(&tab.document);
+    editor_.setSelectionRange(tab.selectionAnchor, tab.selectionCaret);
+    transportTick_ = tab.selectionCaret;
+    transportTotalTicks_ = activeScoreTickCount();
+    updateWindowTitle();
+    setStatus(L"已恢复");
+}
+
+void MainWindow::toggleInsertMode() {
+    insertMode_ = !insertMode_;
+    editor_.setInsertMode(insertMode_);
+    setStatus(insertMode_ ? L"已切换为插入模式：输入会将后续拍位向后移动"
+                          : L"已切换为替换模式：输入会替换当前拍位");
+}
+
 void MainWindow::newDocument() {
     DocumentTab tab;
     tab.displayName = L"未命名 " + std::to_wstring(untitledCounter_++);
+    tab.savedText = tab.document.toText();
     documents_.push_back(std::move(tab));
     setActiveDocument(documents_.size() - 1);
     setStatus(L"已新建空白乐谱；选择任意拍位即可输入");
@@ -783,6 +1380,7 @@ void MainWindow::openDocument() {
     tab.document = ui::ScoreDocument::fromText(text);
     tab.path = normalized;
     tab.displayName = fileNameFor(normalized);
+    tab.savedText = tab.document.toText();
     documents_.push_back(std::move(tab));
     setActiveDocument(documents_.size() - 1);
     setStatus(L"乐谱已载入内存；编辑不会改动源文件，直到执行保存");
@@ -823,6 +1421,7 @@ bool MainWindow::writeDocument(std::size_t index, const std::filesystem::path& p
 
     documents_[index].path = std::filesystem::absolute(path).lexically_normal();
     documents_[index].displayName = fileNameFor(path);
+    documents_[index].savedText = content;
     documents_[index].modified = false;
     updateWindowTitle();
     setStatus(L"已保存到 " + documents_[index].path->wstring());
@@ -872,9 +1471,12 @@ void MainWindow::setActiveDocument(std::size_t index) {
     }
     activeDocument_ = index;
     editor_.setDocument(&documents_[activeDocument_].document);
-    transportTick_ = 0;
+    editor_.setSelectionRange(documents_[activeDocument_].selectionAnchor,
+                              documents_[activeDocument_].selectionCaret);
+    editor_.setInsertMode(insertMode_);
+    syncBpmEditor();
+    transportTick_ = documents_[activeDocument_].selectionCaret;
     transportTotalTicks_ = activeScoreTickCount();
-    editor_.setPlayheadTick(0, false);
     updateWindowTitle();
     InvalidateRect(window_, nullptr, FALSE);
 }
@@ -883,13 +1485,18 @@ void MainWindow::markActiveDocumentChanged() {
     if (activeDocument_ >= documents_.size()) {
         return;
     }
-    documents_[activeDocument_].modified = true;
+    documents_[activeDocument_].modified = documents_[activeDocument_].document.toText() !=
+        documents_[activeDocument_].savedText;
     transportTotalTicks_ = std::max<std::size_t>(1, activeScoreTickCount());
     updateWindowTitle();
     setStatus(L"修改仅保存在内存中 · Ctrl+S 保存 · Ctrl+Shift+S 另存为");
 }
 
 void MainWindow::onEditorSelectionChanged(std::size_t tickIndex) {
+    if (activeDocument_ < documents_.size()) {
+        documents_[activeDocument_].selectionAnchor = editor_.selectionAnchorTick();
+        documents_[activeDocument_].selectionCaret = editor_.selectionCaretTick();
+    }
     transportTick_ = tickIndex;
     transportTotalTicks_ = std::max({std::size_t{1}, activeScoreTickCount(), tickIndex + 1});
     if (playbackRunning_) {
@@ -900,13 +1507,16 @@ void MainWindow::onEditorSelectionChanged(std::size_t tickIndex) {
 }
 
 double MainWindow::playbackBpm() const {
-    if (!bpmEdit_) {
+    if (activeDocument_ >= documents_.size()) {
         return 80.0;
     }
-    wchar_t text[32]{};
-    GetWindowTextW(bpmEdit_, text, static_cast<int>(std::size(text)));
-    const double value = std::wcstod(text, nullptr);
-    return value > 0.0 ? value : 0.0;
+    const auto& document = documents_[activeDocument_];
+    const std::wstring& text = document.bpmText;
+    wchar_t* end = nullptr;
+    const double value = std::wcstod(text.c_str(), &end);
+    return end != text.c_str() && end && *end == L'\0' && value > 0.0
+        ? value * static_cast<double>(document.bpmCorrection)
+        : 0.0;
 }
 
 std::size_t MainWindow::activeScoreTickCount() const {
@@ -1008,20 +1618,28 @@ void MainWindow::startPlayback(std::size_t tickIndex) {
     }
 
     stopPlayback();
-    auto keySender = std::make_unique<playback::VirtualHidKeySender>();
-    if (!keySender->isOpen()) {
-        setStatus(L"虚拟 HID 驱动未安装或未启动 · 请先安装 driver/YuanqinVhid");
-        return;
-    }
     const HWND gameWindow = playback::GenshinWindowTarget::find();
     if (!gameWindow || !playback::GenshinWindowTarget::activate(gameWindow, window_)) {
         setStatus(L"未找到或无法激活原神窗口 · 请先启动原神并保持窗口化或无边框模式");
         return;
     }
+
+    std::unique_ptr<playback::IKeySender> keySender;
+    if (outputBackend_ == OutputBackend::WindowsApi) {
+        keySender = std::make_unique<playback::WindowsApiKeySender>(gameWindow);
+    } else {
+        auto virtualHidSender = std::make_unique<playback::VirtualHidKeySender>();
+        if (!virtualHidSender->isOpen()) {
+            setStatus(L"虚拟 HID 驱动未安装或未启动 · 可在系统设置中改用 Windows API");
+            return;
+        }
+        keySender = std::move(virtualHidSender);
+    }
     transportTick_ = tickIndex;
     editor_.setPlaybackActive(true);
     editor_.setPlayheadTick(tickIndex, true);
     EnableWindow(bpmEdit_, FALSE);
+    EnableWindow(bpmCorrectionCombo_, FALSE);
     playbackRunning_ = true;
     const std::uint64_t generation = ++playbackGeneration_;
     playback::PlaybackOptions options;
@@ -1044,7 +1662,9 @@ void MainWindow::startPlayback(std::size_t tickIndex) {
             PostMessageW(window_, kPlaybackCompleteMessage, static_cast<WPARAM>(generation),
                          static_cast<LPARAM>(result.status));
         });
-    setStatus(L"正在通过虚拟 HID 键盘播放 · 乐谱编辑已锁定 · 点击其他拍位可立即跳播");
+    setStatus(outputBackend_ == OutputBackend::WindowsApi
+                  ? L"正在通过 Windows API 播放 · 乐谱编辑已锁定 · 点击其他拍位可立即跳播"
+                  : L"正在通过虚拟 HID 键盘播放 · 乐谱编辑已锁定 · 点击其他拍位可立即跳播");
     InvalidateRect(window_, nullptr, FALSE);
 }
 
@@ -1059,6 +1679,9 @@ void MainWindow::stopPlayback(bool unlockEditor) {
         editor_.setPlaybackActive(false);
         if (bpmEdit_) {
             EnableWindow(bpmEdit_, TRUE);
+        }
+        if (bpmCorrectionCombo_) {
+            EnableWindow(bpmCorrectionCombo_, TRUE);
         }
         InvalidateRect(window_, nullptr, FALSE);
     }
@@ -1113,6 +1736,7 @@ void MainWindow::handlePlaybackComplete(std::uint64_t generation, int status) {
     playbackRunning_ = false;
     editor_.setPlaybackActive(false);
     EnableWindow(bpmEdit_, TRUE);
+    EnableWindow(bpmCorrectionCombo_, TRUE);
     if (status == static_cast<int>(playback::PlaybackStatus::Completed)) {
         transportTick_ = transportTotalTicks_;
         if (transportTotalTicks_ > 0) {
@@ -1120,7 +1744,9 @@ void MainWindow::handlePlaybackComplete(std::uint64_t generation, int status) {
         }
         setStatus(L"播放完成");
     } else if (status == static_cast<int>(playback::PlaybackStatus::SendFailed)) {
-        setStatus(L"播放中断：虚拟 HID 驱动通信失败 · 请检查设备管理器中的 Yuanqin Virtual HID Keyboard");
+        setStatus(outputBackend_ == OutputBackend::WindowsApi
+                      ? L"播放中断：Windows API 按键发送失败"
+                      : L"播放中断：虚拟 HID 驱动通信失败 · 请检查设备管理器中的 Yuanqin Virtual HID Keyboard");
     }
     InvalidateRect(window_, nullptr, FALSE);
 }

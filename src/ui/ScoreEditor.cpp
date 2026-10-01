@@ -88,6 +88,7 @@ void ScoreEditor::setDocument(ScoreDocument* document) {
     document_ = document;
     selectedMeasure_ = 0;
     selectedBeat_ = 0;
+    selectionAnchorTick_ = 0;
     scrollOffset_ = 0;
     playbackActive_ = false;
     followPlayback_ = true;
@@ -100,12 +101,34 @@ void ScoreEditor::setDocument(ScoreDocument* document) {
     }
 }
 
+void ScoreEditor::setSelectionRange(std::size_t anchorTick, std::size_t caretTick) {
+    selectionAnchorTick_ = anchorTick;
+    selectedMeasure_ = caretTick / kBeatsPerMeasure;
+    selectedBeat_ = caretTick % kBeatsPerMeasure;
+    updateScrollBar();
+    ensureSelectionVisible();
+    if (window_) {
+        InvalidateRect(window_, nullptr, FALSE);
+    }
+}
+
 void ScoreEditor::setChangedCallback(std::function<void()> callback) {
     changedCallback_ = std::move(callback);
 }
 
+void ScoreEditor::setBeforeChangeCallback(std::function<void()> callback) {
+    beforeChangeCallback_ = std::move(callback);
+}
+
 void ScoreEditor::setSelectionChangedCallback(std::function<void(std::size_t)> callback) {
     selectionChangedCallback_ = std::move(callback);
+}
+
+void ScoreEditor::setInsertMode(bool enabled) {
+    insertMode_ = enabled;
+    if (window_) {
+        InvalidateRect(window_, nullptr, FALSE);
+    }
 }
 
 void ScoreEditor::setPlaybackActive(bool active) {
@@ -122,6 +145,7 @@ void ScoreEditor::setPlaybackActive(bool active) {
 void ScoreEditor::setPlayheadTick(std::size_t tickIndex, bool centerIfFollowing) {
     selectedMeasure_ = tickIndex / kBeatsPerMeasure;
     selectedBeat_ = tickIndex % kBeatsPerMeasure;
+    selectionAnchorTick_ = tickIndex;
     updateScrollBar();
     if (playbackActive_ && centerIfFollowing) {
         if (followPlayback_) {
@@ -137,6 +161,22 @@ void ScoreEditor::setPlayheadTick(std::size_t tickIndex, bool centerIfFollowing)
 
 std::size_t ScoreEditor::selectedTick() const noexcept {
     return selectedMeasure_ * kBeatsPerMeasure + selectedBeat_;
+}
+
+std::size_t ScoreEditor::selectionAnchorTick() const noexcept {
+    return selectionAnchorTick_;
+}
+
+std::size_t ScoreEditor::selectionCaretTick() const noexcept {
+    return selectedTick();
+}
+
+std::size_t ScoreEditor::selectionStartTick() const noexcept {
+    return std::min(selectionAnchorTick_, selectedTick());
+}
+
+std::size_t ScoreEditor::selectionEndTick() const noexcept {
+    return std::max(selectionAnchorTick_, selectedTick());
 }
 
 std::size_t ScoreEditor::displayedTickCount() const {
@@ -198,11 +238,46 @@ LRESULT ScoreEditor::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
             if (selectAt(point)) {
                 followPlayback_ = true;
                 KillTimer(window_, kReturnToPlayheadTimer);
+                selectionAnchorTick_ = selectedTick();
+                if (!playbackActive_) {
+                    mouseSelecting_ = true;
+                    SetCapture(window_);
+                }
                 InvalidateRect(window_, nullptr, FALSE);
                 notifySelectionChanged();
             }
             return 0;
         }
+
+        case WM_MOUSEMOVE:
+            if (mouseSelecting_) {
+                POINT point{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+                if (selectAt(point)) {
+                    ensureSelectionVisible();
+                    InvalidateRect(window_, nullptr, FALSE);
+                    notifySelectionChanged();
+                }
+                return 0;
+            }
+            break;
+
+        case WM_LBUTTONUP:
+            if (mouseSelecting_) {
+                mouseSelecting_ = false;
+                ReleaseCapture();
+                POINT point{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+                if (selectAt(point)) {
+                    ensureSelectionVisible();
+                    InvalidateRect(window_, nullptr, FALSE);
+                    notifySelectionChanged();
+                }
+                return 0;
+            }
+            break;
+
+        case WM_CAPTURECHANGED:
+            mouseSelecting_ = false;
+            return 0;
 
         case WM_MOUSEWHEEL:
             markUserScroll();
@@ -240,64 +315,66 @@ LRESULT ScoreEditor::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
             }
             break;
 
-        case WM_KEYDOWN:
+        case WM_KEYDOWN: {
             if (!document_) {
                 return 0;
             }
             if (playbackActive_) {
                 return 0;
             }
+            if (GetKeyState(VK_CONTROL) & 0x8000) {
+                switch (wParam) {
+                    case 'C': copySelectionToClipboard(); return 0;
+                    case 'X': cutSelectionToClipboard(); return 0;
+                    case 'V': pasteClipboard(); return 0;
+                    default: break;
+                }
+            }
             if (!(GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000)) {
                 if (wParam >= 'A' && wParam <= 'Z' &&
                     core::ScoreParser::isPlayableNote(static_cast<char>(wParam))) {
-                    const auto& before = document_->beat(selectedMeasure_, selectedBeat_);
-                    const bool isGroup = before.size() >= 2 &&
-                                         (before.front() == '(' || before.front() == '[');
-                    document_->typeNote(selectedMeasure_, selectedBeat_, static_cast<char>(wParam));
-                    notifyChanged();
-                    if (!isGroup) {
-                        moveSelection(1);
-                    }
+                    typeNote(static_cast<char>(wParam));
                     return 0;
                 }
                 if (wParam == VK_OEM_4 || (wParam == '9' && (GetKeyState(VK_SHIFT) & 0x8000))) {
-                    document_->beginGroup(selectedMeasure_, selectedBeat_,
-                                          wParam == VK_OEM_4 ? '[' : '(');
-                    notifyChanged();
+                    beginGroup(wParam == VK_OEM_4 ? '[' : '(');
+                    return 0;
+                }
+                if (wParam == VK_SPACE) {
+                    replaceSelection({std::string{}}, insertMode_);
                     return 0;
                 }
             }
+            const bool extendSelection = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
             switch (wParam) {
-                case VK_LEFT: moveSelection(-1); return 0;
-                case VK_RIGHT: moveSelection(1); return 0;
-                case VK_UP: moveSelection(-static_cast<long long>(kBeatsPerMeasure * kMeasuresPerRow)); return 0;
-                case VK_DOWN: moveSelection(kBeatsPerMeasure * kMeasuresPerRow); return 0;
-                case VK_TAB: moveSelection((GetKeyState(VK_SHIFT) & 0x8000) ? -1 : 1); return 0;
+                case VK_LEFT: moveSelection(-1, extendSelection); return 0;
+                case VK_RIGHT: moveSelection(1, extendSelection); return 0;
+                case VK_UP: moveSelection(-static_cast<long long>(kBeatsPerMeasure * kMeasuresPerRow), extendSelection); return 0;
+                case VK_DOWN: moveSelection(kBeatsPerMeasure * kMeasuresPerRow, extendSelection); return 0;
+                case VK_TAB: moveSelection(extendSelection ? -1 : 1, extendSelection); return 0;
                 case VK_HOME:
-                    selectedBeat_ = 0;
-                    InvalidateRect(window_, nullptr, FALSE);
-                    notifySelectionChanged();
+                    setCaretTick((selectedTick() / kBeatsPerMeasure) * kBeatsPerMeasure,
+                                 extendSelection);
                     return 0;
                 case VK_END:
-                    selectedBeat_ = kBeatsPerMeasure - 1;
-                    InvalidateRect(window_, nullptr, FALSE);
-                    notifySelectionChanged();
+                    setCaretTick((selectedTick() / kBeatsPerMeasure) * kBeatsPerMeasure +
+                                     kBeatsPerMeasure - 1,
+                                 extendSelection);
                     return 0;
                 case VK_BACK:
-                    document_->backspace(selectedMeasure_, selectedBeat_);
-                    notifyChanged();
+                    deleteSelectionBackward();
                     return 0;
                 case VK_DELETE:
-                    document_->clearBeat(selectedMeasure_, selectedBeat_);
-                    notifyChanged();
+                    clearSelection();
                     return 0;
                 case VK_RETURN:
-                    moveSelection(1);
+                    moveSelection(1, false);
                     return 0;
                 default:
                     break;
             }
             break;
+        }
 
         case WM_CHAR: {
             // Musical input is handled from WM_KEYDOWN so it remains independent
@@ -460,14 +537,17 @@ void ScoreEditor::paint() {
             continue;
         }
 
-        const bool selected = document_ && cell.measureIndex == selectedMeasure_ &&
-                              cell.beatIndex == selectedBeat_;
+        const std::size_t cellTick = cell.measureIndex * kBeatsPerMeasure + cell.beatIndex;
+        const bool selected = document_ && cellTick >= selectionStartTick() &&
+                              cellTick <= selectionEndTick();
+        const bool caret = document_ && cell.measureIndex == selectedMeasure_ &&
+                           cell.beatIndex == selectedBeat_;
         if (selected) {
             RECT highlight = cell.bounds;
             InflateRect(&highlight, -3, -5);
             fillRoundedRect(context, highlight, 9,
                             playbackActive_ ? RGB(214, 246, 245) : kSelection);
-            const HPEN selectionPen = CreatePen(PS_SOLID, 2,
+            const HPEN selectionPen = CreatePen(PS_SOLID, caret ? 2 : 1,
                                                  playbackActive_ ? RGB(39, 170, 176)
                                                                  : kSelectionBorder);
             const auto oldPen = SelectObject(context, selectionPen);
@@ -501,7 +581,7 @@ void ScoreEditor::paint() {
         SelectObject(context, noteFont_);
         if (value.empty()) {
             SetTextColor(context, kEmptyHint);
-            const wchar_t* placeholder = selected ? L"·" : L"";
+            const wchar_t* placeholder = caret ? L"·" : L"";
             DrawTextW(context, placeholder, -1, &textRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         } else {
             SetTextColor(context, kInk);
@@ -594,6 +674,12 @@ void ScoreEditor::markUserScroll() {
     SetTimer(window_, kReturnToPlayheadTimer, 3000, nullptr);
 }
 
+void ScoreEditor::notifyBeforeChange() {
+    if (beforeChangeCallback_) {
+        beforeChangeCallback_();
+    }
+}
+
 void ScoreEditor::notifyChanged() {
     updateScrollBar();
     InvalidateRect(window_, nullptr, FALSE);
@@ -608,15 +694,239 @@ void ScoreEditor::notifySelectionChanged() {
     }
 }
 
-void ScoreEditor::moveSelection(long long beatDelta) {
-    const long long current = static_cast<long long>(selectedMeasure_ * kBeatsPerMeasure + selectedBeat_);
-    const long long next = std::max(0LL, current + beatDelta);
-    selectedMeasure_ = static_cast<std::size_t>(next) / kBeatsPerMeasure;
-    selectedBeat_ = static_cast<std::size_t>(next) % kBeatsPerMeasure;
+bool ScoreEditor::hasSelection() const noexcept {
+    return selectionAnchorTick_ != selectedTick();
+}
+
+void ScoreEditor::setCaretTick(std::size_t tickIndex, bool extendSelection) {
+    selectedMeasure_ = tickIndex / kBeatsPerMeasure;
+    selectedBeat_ = tickIndex % kBeatsPerMeasure;
+    if (!extendSelection) {
+        selectionAnchorTick_ = tickIndex;
+    }
     updateScrollBar();
     ensureSelectionVisible();
     InvalidateRect(window_, nullptr, FALSE);
     notifySelectionChanged();
+}
+
+void ScoreEditor::collapseSelectionForMove(bool towardEnd) {
+    if (!hasSelection()) {
+        return;
+    }
+    setCaretTick(towardEnd ? selectionEndTick() : selectionStartTick(), false);
+}
+
+void ScoreEditor::moveSelection(long long beatDelta, bool extendSelection) {
+    if (!extendSelection && hasSelection()) {
+        collapseSelectionForMove(beatDelta > 0);
+        return;
+    }
+    const long long current = static_cast<long long>(selectedTick());
+    const long long next = std::max(0LL, current + beatDelta);
+    setCaretTick(static_cast<std::size_t>(next), extendSelection);
+}
+
+void ScoreEditor::replaceSelection(const std::vector<std::string>& values, bool insertBefore) {
+    if (!document_ || values.empty()) {
+        return;
+    }
+    const std::size_t start = selectionStartTick();
+    const std::size_t count = selectionEndTick() - start + 1;
+    notifyBeforeChange();
+    if (hasSelection()) {
+        document_->eraseBeats(start, count);
+        document_->insertBeats(start, values);
+    } else if (insertBefore) {
+        document_->insertBeats(start, values);
+    } else {
+        for (std::size_t index = 0; index < values.size(); ++index) {
+            document_->setBeatAt(start + index, values[index]);
+        }
+    }
+    setCaretTick(start + values.size(), false);
+    notifyChanged();
+}
+
+void ScoreEditor::typeNote(char note) {
+    if (!document_) {
+        return;
+    }
+    if (hasSelection() || insertMode_) {
+        replaceSelection({std::string(1, note)}, insertMode_);
+        return;
+    }
+
+    const auto& before = document_->beat(selectedMeasure_, selectedBeat_);
+    const bool isGroup = before.size() >= 2 && (before.front() == '(' || before.front() == '[');
+    notifyBeforeChange();
+    document_->typeNote(selectedMeasure_, selectedBeat_, note);
+    notifyChanged();
+    if (!isGroup) {
+        moveSelection(1, false);
+    }
+}
+
+void ScoreEditor::beginGroup(char opening) {
+    if (!document_) {
+        return;
+    }
+    if (hasSelection() || insertMode_) {
+        replaceSelection({opening == '(' ? "()" : "[]"}, insertMode_);
+        return;
+    }
+    notifyBeforeChange();
+    document_->beginGroup(selectedMeasure_, selectedBeat_, opening);
+    notifyChanged();
+}
+
+void ScoreEditor::clearSelection() {
+    if (!document_) {
+        return;
+    }
+    const std::size_t start = selectionStartTick();
+    const std::size_t count = selectionEndTick() - start + 1;
+    notifyBeforeChange();
+    document_->clearBeats(start, count);
+    setCaretTick(start, false);
+    notifyChanged();
+}
+
+void ScoreEditor::deleteSelectionBackward() {
+    if (!document_) {
+        return;
+    }
+    std::size_t start = selectionStartTick();
+    std::size_t count = selectionEndTick() - start + 1;
+    if (!hasSelection()) {
+        if (start == 0) {
+            return;
+        }
+        --start;
+        count = 1;
+    }
+    notifyBeforeChange();
+    document_->eraseBeats(start, count);
+    setCaretTick(start, false);
+    notifyChanged();
+}
+
+void ScoreEditor::copySelectionToClipboard() const {
+    if (!document_ || !OpenClipboard(window_)) {
+        return;
+    }
+    EmptyClipboard();
+    const auto values = document_->beatsInRange(selectionStartTick(),
+                                                 selectionEndTick() - selectionStartTick() + 1);
+    std::wstring text;
+    for (std::size_t index = 0; index < values.size(); ++index) {
+        if (index > 0) {
+            text.push_back(L'\t');
+        }
+        text.append(values[index].begin(), values[index].end());
+    }
+    const std::size_t bytes = (text.size() + 1) * sizeof(wchar_t);
+    HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, bytes);
+    if (memory) {
+        if (auto* target = static_cast<wchar_t*>(GlobalLock(memory))) {
+            std::copy(text.c_str(), text.c_str() + text.size() + 1, target);
+            GlobalUnlock(memory);
+            if (!SetClipboardData(CF_UNICODETEXT, memory)) {
+                GlobalFree(memory);
+            }
+        } else {
+            GlobalFree(memory);
+        }
+    }
+    CloseClipboard();
+}
+
+void ScoreEditor::cutSelectionToClipboard() {
+    if (!document_) {
+        return;
+    }
+    copySelectionToClipboard();
+    const std::size_t start = selectionStartTick();
+    const std::size_t count = selectionEndTick() - start + 1;
+    notifyBeforeChange();
+    document_->eraseBeats(start, count);
+    setCaretTick(start, false);
+    notifyChanged();
+}
+
+std::vector<std::string> ScoreEditor::clipboardBeats() const {
+    std::vector<std::string> result;
+    if (!IsClipboardFormatAvailable(CF_UNICODETEXT) || !OpenClipboard(window_)) {
+        return result;
+    }
+    const HGLOBAL handle = GetClipboardData(CF_UNICODETEXT);
+    const auto* source = handle ? static_cast<const wchar_t*>(GlobalLock(handle)) : nullptr;
+    if (!source) {
+        CloseClipboard();
+        return result;
+    }
+    std::string text;
+    for (const wchar_t* current = source; *current; ++current) {
+        if (*current <= 0x7f) {
+            text.push_back(static_cast<char>(*current));
+        }
+    }
+    GlobalUnlock(handle);
+    CloseClipboard();
+
+    const bool hasSeparators = text.find_first_of("\t\r\n") != std::string::npos;
+    if (hasSeparators) {
+        std::string current;
+        for (std::size_t index = 0; index < text.size(); ++index) {
+            const char value = text[index];
+            if (value == '\r' && index + 1 < text.size() && text[index + 1] == '\n') {
+                continue;
+            }
+            if (value == '\t' || value == '\n' || value == '\r') {
+                result.push_back(std::move(current));
+                current.clear();
+            } else {
+                current.push_back(value);
+            }
+        }
+        result.push_back(std::move(current));
+        return result;
+    }
+
+    for (std::size_t index = 0; index < text.size();) {
+        const char value = text[index++];
+        if (value == '(' || value == '[') {
+            const char closing = value == '(' ? ')' : ']';
+            std::string group(1, value);
+            while (index < text.size() && text[index] != closing) {
+                if (core::ScoreParser::isPlayableNote(text[index])) {
+                    group.push_back(text[index]);
+                }
+                ++index;
+            }
+            if (index < text.size() && text[index] == closing) {
+                ++index;
+            }
+            group.push_back(closing);
+            result.push_back(std::move(group));
+        } else if (value == ' ') {
+            result.emplace_back();
+        } else if (core::ScoreParser::isPlayableNote(value)) {
+            result.emplace_back(1, value);
+        }
+    }
+    return result;
+}
+
+void ScoreEditor::pasteClipboard() {
+    if (!document_) {
+        return;
+    }
+    const auto values = clipboardBeats();
+    if (values.empty()) {
+        return;
+    }
+    replaceSelection(values, insertMode_);
 }
 
 bool ScoreEditor::selectAt(POINT point) {

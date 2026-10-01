@@ -17,6 +17,7 @@ add_library(yuanqin_playback STATIC
     src/playback/SerialKeySender.cpp
     src/playback/VirtualHidKeySender.cpp
     src/playback/Win32KeySender.cpp
+    src/playback/WindowsApiKeySender.cpp
 )
 target_include_directories(yuanqin_playback PUBLIC include PRIVATE shared)
 target_link_libraries(yuanqin_playback PUBLIC yuanqin_core user32 setupapi)

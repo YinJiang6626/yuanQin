@@ -27,6 +27,7 @@ public:
     [[nodiscard]] std::string toText() const;
 
     [[nodiscard]] std::size_t measureCount() const noexcept;
+    [[nodiscard]] std::size_t beatCount() const noexcept;
     [[nodiscard]] const EditableMeasure* measure(std::size_t index) const noexcept;
     [[nodiscard]] const std::string& beat(std::size_t measureIndex,
                                           std::size_t beatIndex) const noexcept;
@@ -38,8 +39,19 @@ public:
     void backspace(std::size_t measureIndex, std::size_t beatIndex);
     void clearBeat(std::size_t measureIndex, std::size_t beatIndex);
 
+    // Linear operations used by the grid editor. A tick is one editable beat
+    // (four ticks make one measure).
+    [[nodiscard]] std::vector<std::string> beatsInRange(std::size_t startTick,
+                                                         std::size_t count) const;
+    void setBeatAt(std::size_t tickIndex, std::string value);
+    void insertBeat(std::size_t tickIndex, std::string value);
+    void insertBeats(std::size_t tickIndex, const std::vector<std::string>& values);
+    void eraseBeats(std::size_t startTick, std::size_t count);
+    void clearBeats(std::size_t startTick, std::size_t count);
+
 private:
     void ensureMeasure(std::size_t index);
+    [[nodiscard]] std::size_t contentBeatCount() const noexcept;
 
     std::vector<EditableMeasure> measures_;
 };

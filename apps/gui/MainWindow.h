@@ -24,11 +24,26 @@ public:
 
 private:
     enum class ToolbarAction { NewFile, OpenFile, Save, SaveAs };
+    enum class Page { SystemSettings, Workspace };
+    enum class OutputBackend { WindowsApi, VirtualHid };
+
+    struct EditorSnapshot {
+        ui::ScoreDocument document;
+        std::size_t selectionAnchor{};
+        std::size_t selectionCaret{};
+    };
 
     struct DocumentTab {
         ui::ScoreDocument document;
         std::optional<std::filesystem::path> path;
         std::wstring displayName;
+        std::string savedText;
+        std::wstring bpmText{L"80"};
+        int bpmCorrection{1};
+        std::size_t selectionAnchor{};
+        std::size_t selectionCaret{};
+        std::vector<EditorSnapshot> undoHistory;
+        std::vector<EditorSnapshot> redoHistory;
         bool modified{false};
     };
 
@@ -52,6 +67,21 @@ private:
     void destroyFonts();
     void layoutChildren();
     void paint();
+    void paintSidebar(HDC context, const RECT& client);
+    void paintSettingsPage(HDC context, const RECT& client);
+    void setActivePage(Page page);
+    void toggleSidebar();
+    void updatePageVisibility();
+    void syncBpmEditor();
+    void syncTempoControls();
+    void updateOutputBackendFromControl();
+    void updateBpmCorrectionFromControl();
+    void recordActiveDocumentHistory();
+    void undoActiveDocument();
+    void redoActiveDocument();
+    void toggleInsertMode();
+    void scrollSettingsBy(int delta);
+    void setSettingsScrollFromY(int y);
     void newDocument();
     void openDocument();
     bool saveDocument(std::size_t index);
@@ -82,6 +112,15 @@ private:
     [[nodiscard]] RECT progressBounds() const;
     [[nodiscard]] RECT opacityBounds() const;
     [[nodiscard]] RECT headerDragBounds() const;
+    [[nodiscard]] RECT editModeToggleBounds() const;
+    [[nodiscard]] RECT sidebarSettingsBounds() const;
+    [[nodiscard]] RECT sidebarWorkspaceBounds() const;
+    [[nodiscard]] RECT sidebarToggleBounds() const;
+    [[nodiscard]] RECT settingsViewportBounds() const;
+    [[nodiscard]] RECT settingsScrollbarBounds() const;
+    [[nodiscard]] RECT settingsScrollThumbBounds() const;
+    [[nodiscard]] int sidebarWidth() const noexcept;
+    [[nodiscard]] int maximumSettingsScroll() const;
     [[nodiscard]] bool shouldHandleWithoutActivation(POINT clientPoint) const;
     [[nodiscard]] std::vector<ToolbarItem> toolbarItems() const;
     [[nodiscard]] std::vector<TabItem> tabItems() const;
@@ -92,6 +131,8 @@ private:
     HWND window_{nullptr};
     HINSTANCE instance_{nullptr};
     HWND bpmEdit_{nullptr};
+    HWND bpmCorrectionCombo_{nullptr};
+    HWND outputBackendCombo_{nullptr};
     HBRUSH bpmEditBrush_{nullptr};
     ui::ScoreEditor editor_;
     std::vector<DocumentTab> documents_;
@@ -115,6 +156,14 @@ private:
     bool draggingWindow_{false};
     POINT windowDragStartCursor_{};
     RECT windowDragStartBounds_{};
+    Page activePage_{Page::Workspace};
+    OutputBackend outputBackend_{OutputBackend::WindowsApi};
+    bool insertMode_{false};
+    bool sidebarExpanded_{false};
+    int settingsScrollOffset_{0};
+    bool draggingSettingsScroll_{false};
+    bool updatingBpmEdit_{false};
+    bool updatingTempoControls_{false};
 };
 
 }  // namespace yuanqin::app
