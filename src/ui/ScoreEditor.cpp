@@ -21,6 +21,7 @@ constexpr int kRowHeight = 88;
 constexpr int kRowGap = 14;
 constexpr int kRowNumberWidth = 46;
 constexpr std::size_t kDefaultRows = 8;
+constexpr UINT_PTR kReturnToPlayheadTimer = 1;
 
 constexpr COLORREF kCanvas = RGB(238, 247, 250);
 constexpr COLORREF kCard = RGB(252, 254, 255);
@@ -88,6 +89,11 @@ void ScoreEditor::setDocument(ScoreDocument* document) {
     selectedMeasure_ = 0;
     selectedBeat_ = 0;
     scrollOffset_ = 0;
+    playbackActive_ = false;
+    followPlayback_ = true;
+    if (window_) {
+        KillTimer(window_, kReturnToPlayheadTimer);
+    }
     updateScrollBar();
     if (window_) {
         InvalidateRect(window_, nullptr, FALSE);
@@ -96,6 +102,45 @@ void ScoreEditor::setDocument(ScoreDocument* document) {
 
 void ScoreEditor::setChangedCallback(std::function<void()> callback) {
     changedCallback_ = std::move(callback);
+}
+
+void ScoreEditor::setSelectionChangedCallback(std::function<void(std::size_t)> callback) {
+    selectionChangedCallback_ = std::move(callback);
+}
+
+void ScoreEditor::setPlaybackActive(bool active) {
+    playbackActive_ = active;
+    followPlayback_ = true;
+    if (!active && window_) {
+        KillTimer(window_, kReturnToPlayheadTimer);
+    }
+    if (window_) {
+        InvalidateRect(window_, nullptr, FALSE);
+    }
+}
+
+void ScoreEditor::setPlayheadTick(std::size_t tickIndex, bool centerIfFollowing) {
+    selectedMeasure_ = tickIndex / kBeatsPerMeasure;
+    selectedBeat_ = tickIndex % kBeatsPerMeasure;
+    updateScrollBar();
+    if (playbackActive_ && centerIfFollowing) {
+        if (followPlayback_) {
+            centerSelection();
+        }
+    } else {
+        ensureSelectionVisible();
+    }
+    if (window_) {
+        InvalidateRect(window_, nullptr, FALSE);
+    }
+}
+
+std::size_t ScoreEditor::selectedTick() const noexcept {
+    return selectedMeasure_ * kBeatsPerMeasure + selectedBeat_;
+}
+
+std::size_t ScoreEditor::displayedTickCount() const {
+    return displayedRowCount() * kMeasuresPerRow * kBeatsPerMeasure;
 }
 
 LRESULT CALLBACK ScoreEditor::windowProcedure(HWND window, UINT message, WPARAM wParam,
@@ -146,19 +191,26 @@ LRESULT ScoreEditor::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
             return 0;
 
         case WM_LBUTTONDOWN: {
-            SetFocus(window_);
+            if (GetForegroundWindow() == GetAncestor(window_, GA_ROOT)) {
+                SetFocus(window_);
+            }
             POINT point{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
             if (selectAt(point)) {
+                followPlayback_ = true;
+                KillTimer(window_, kReturnToPlayheadTimer);
                 InvalidateRect(window_, nullptr, FALSE);
+                notifySelectionChanged();
             }
             return 0;
         }
 
         case WM_MOUSEWHEEL:
+            markUserScroll();
             scrollBy(-GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA * 58);
             return 0;
 
         case WM_VSCROLL: {
+            markUserScroll();
             SCROLLINFO info{};
             info.cbSize = sizeof(info);
             info.fMask = SIF_ALL;
@@ -176,8 +228,23 @@ LRESULT ScoreEditor::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
             return 0;
         }
 
+        case WM_TIMER:
+            if (wParam == kReturnToPlayheadTimer) {
+                KillTimer(window_, kReturnToPlayheadTimer);
+                if (playbackActive_) {
+                    followPlayback_ = true;
+                    centerSelection();
+                    InvalidateRect(window_, nullptr, FALSE);
+                }
+                return 0;
+            }
+            break;
+
         case WM_KEYDOWN:
             if (!document_) {
+                return 0;
+            }
+            if (playbackActive_) {
                 return 0;
             }
             if (!(GetKeyState(VK_CONTROL) & 0x8000) && !(GetKeyState(VK_MENU) & 0x8000)) {
@@ -209,10 +276,12 @@ LRESULT ScoreEditor::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
                 case VK_HOME:
                     selectedBeat_ = 0;
                     InvalidateRect(window_, nullptr, FALSE);
+                    notifySelectionChanged();
                     return 0;
                 case VK_END:
                     selectedBeat_ = kBeatsPerMeasure - 1;
                     InvalidateRect(window_, nullptr, FALSE);
+                    notifySelectionChanged();
                     return 0;
                 case VK_BACK:
                     document_->backspace(selectedMeasure_, selectedBeat_);
@@ -396,8 +465,11 @@ void ScoreEditor::paint() {
         if (selected) {
             RECT highlight = cell.bounds;
             InflateRect(&highlight, -3, -5);
-            fillRoundedRect(context, highlight, 9, kSelection);
-            const HPEN selectionPen = CreatePen(PS_SOLID, 2, kSelectionBorder);
+            fillRoundedRect(context, highlight, 9,
+                            playbackActive_ ? RGB(214, 246, 245) : kSelection);
+            const HPEN selectionPen = CreatePen(PS_SOLID, 2,
+                                                 playbackActive_ ? RGB(39, 170, 176)
+                                                                 : kSelectionBorder);
             const auto oldPen = SelectObject(context, selectionPen);
             const auto oldBrush = SelectObject(context, GetStockObject(NULL_BRUSH));
             RoundRect(context, highlight.left, highlight.top, highlight.right, highlight.bottom, 9, 9);
@@ -502,11 +574,37 @@ void ScoreEditor::ensureSelectionVisible() {
     }
 }
 
+void ScoreEditor::centerSelection() {
+    if (!window_) {
+        return;
+    }
+    RECT client{};
+    GetClientRect(window_, &client);
+    const int row = static_cast<int>(selectedMeasure_ / kMeasuresPerRow);
+    const int rowCenter = kRowTop + row * (kRowHeight + kRowGap) + kRowHeight / 2;
+    setScrollOffset(rowCenter - static_cast<int>(client.bottom) / 2);
+}
+
+void ScoreEditor::markUserScroll() {
+    if (!playbackActive_ || !window_) {
+        return;
+    }
+    followPlayback_ = false;
+    KillTimer(window_, kReturnToPlayheadTimer);
+    SetTimer(window_, kReturnToPlayheadTimer, 3000, nullptr);
+}
+
 void ScoreEditor::notifyChanged() {
     updateScrollBar();
     InvalidateRect(window_, nullptr, FALSE);
     if (changedCallback_) {
         changedCallback_();
+    }
+}
+
+void ScoreEditor::notifySelectionChanged() {
+    if (selectionChangedCallback_) {
+        selectionChangedCallback_(selectedTick());
     }
 }
 
@@ -518,6 +616,7 @@ void ScoreEditor::moveSelection(long long beatDelta) {
     updateScrollBar();
     ensureSelectionVisible();
     InvalidateRect(window_, nullptr, FALSE);
+    notifySelectionChanged();
 }
 
 bool ScoreEditor::selectAt(POINT point) {

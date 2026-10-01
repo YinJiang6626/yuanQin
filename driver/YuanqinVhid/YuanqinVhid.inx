@@ -1,0 +1,60 @@
+[Version]
+Signature="$WINDOWS NT$"
+Class=System
+ClassGuid={4d36e97d-e325-11ce-bfc1-08002be10318}
+Provider=%ManufacturerName%
+DriverVer=10/01/2026,1.0.0.0
+CatalogFile=YuanqinVhid.cat
+PnpLockdown=1
+
+[DestinationDirs]
+DefaultDestDir = 13
+
+[SourceDisksNames]
+1 = %DiskName%,,,
+
+[SourceDisksFiles]
+YuanqinVhid.sys = 1
+
+[Manufacturer]
+%ManufacturerName%=Standard,NT$ARCH$
+
+[Standard.NT$ARCH$]
+%DeviceDesc%=YuanqinVhid_Install,Root\YuanqinVhid
+
+[YuanqinVhid_Install.NT]
+CopyFiles=DriverCopyFiles
+
+[DriverCopyFiles]
+YuanqinVhid.sys
+
+[YuanqinVhid_Install.NT.HW]
+AddReg=YuanqinVhid_DeviceSettings
+
+[YuanqinVhid_DeviceSettings]
+HKR,,"LowerFilters",0x00010000,"vhf"
+HKR,,DeviceCharacteristics,0x00010001,0x0100
+HKR,,Security,,"D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)"
+
+[YuanqinVhid_Install.NT.Services]
+AddService=YuanqinVhid,%SPSVCINST_ASSOCSERVICE%,YuanqinVhid_Service
+
+[YuanqinVhid_Service]
+DisplayName=%ServiceDesc%
+ServiceType=1
+StartType=3
+ErrorControl=1
+ServiceBinary=%13%\YuanqinVhid.sys
+
+[YuanqinVhid_Install.NT.Wdf]
+KmdfService=YuanqinVhid,YuanqinVhid_Wdf
+
+[YuanqinVhid_Wdf]
+KmdfLibraryVersion=$KMDFVERSION$
+
+[Strings]
+SPSVCINST_ASSOCSERVICE=0x00000002
+ManufacturerName="Yuanqin Project"
+DiskName="Yuanqin Virtual HID Keyboard Installation Disk"
+DeviceDesc="Yuanqin Virtual HID Keyboard"
+ServiceDesc="Yuanqin Virtual HID Keyboard Driver"

@@ -7,6 +7,15 @@
 namespace yuanqin::playback {
 namespace {
 
+class ReleaseGuard {
+public:
+    explicit ReleaseGuard(IKeySender& sender) noexcept : sender_(sender) {}
+    ~ReleaseGuard() { sender_.releaseAll(); }
+
+private:
+    IKeySender& sender_;
+};
+
 bool cancelled(const CancelCallback& shouldCancel) {
     return shouldCancel && shouldCancel();
 }
@@ -29,16 +38,18 @@ PlaybackResult MusicPlayer::play(const core::Score& score, IKeySender& sender,
                                  const PlaybackOptions& options,
                                  const CancelCallback& shouldCancel,
                                  const TickCallback& onTick) const {
+    ReleaseGuard releaseGuard(sender);
     if (options.bpm <= 0.0) {
         return {PlaybackStatus::InvalidTempo, 0};
     }
 
     const auto tickDuration = std::chrono::duration<double>(60.0 / options.bpm / 4.0);
     const auto startTime = std::chrono::steady_clock::now() + options.startDelay;
+    const std::size_t startTick = std::min(options.startTick, score.tickCount());
 
-    for (std::size_t tickIndex = 0; tickIndex < score.tickCount();) {
+    for (std::size_t tickIndex = startTick; tickIndex < score.tickCount();) {
         const auto tickTime = startTime + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
-                                              tickDuration * static_cast<double>(tickIndex));
+                                              tickDuration * static_cast<double>(tickIndex - startTick));
         if (!waitUntil(tickTime, shouldCancel)) {
             return {PlaybackStatus::Cancelled, tickIndex};
         }
@@ -55,13 +66,11 @@ PlaybackResult MusicPlayer::play(const core::Score& score, IKeySender& sender,
 
         const auto& event = *tick;
         if (event.style == core::PlayStyle::Chord) {
-            for (const char note : event.notes) {
-                if (cancelled(shouldCancel)) {
-                    return {PlaybackStatus::Cancelled, tickIndex};
-                }
-                if (!sender.sendKey(note)) {
-                    return {PlaybackStatus::SendFailed, tickIndex};
-                }
+            if (cancelled(shouldCancel)) {
+                return {PlaybackStatus::Cancelled, tickIndex};
+            }
+            if (!sender.sendChord(event.notes)) {
+                return {PlaybackStatus::SendFailed, tickIndex};
             }
             ++tickIndex;
             continue;
@@ -81,7 +90,27 @@ PlaybackResult MusicPlayer::play(const core::Score& score, IKeySender& sender,
         }
 
         // In the original score format a bracketed pipa note uses the rest of its measure.
-        tickIndex += std::max<std::size_t>(1, options.arpeggioOccupiedTicks);
+        // Still publish every occupied tick so a UI playhead progresses smoothly.
+        const std::size_t occupiedTicks = std::min(
+            std::max<std::size_t>(1, options.arpeggioOccupiedTicks), score.tickCount() - tickIndex);
+        for (std::size_t offset = 1; offset < occupiedTicks; ++offset) {
+            const auto occupiedTickTime = tickTime +
+                std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                    tickDuration * static_cast<double>(offset));
+            if (!waitUntil(occupiedTickTime, shouldCancel)) {
+                return {PlaybackStatus::Cancelled, tickIndex + offset};
+            }
+            if (onTick) {
+                onTick(tickIndex + offset);
+            }
+        }
+        tickIndex += occupiedTicks;
+    }
+
+    const auto endTime = startTime + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                                         tickDuration * static_cast<double>(score.tickCount() - startTick));
+    if (!waitUntil(endTime, shouldCancel)) {
+        return {PlaybackStatus::Cancelled, score.tickCount()};
     }
 
     return {PlaybackStatus::Completed, score.tickCount()};

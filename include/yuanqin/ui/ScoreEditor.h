@@ -24,6 +24,11 @@ public:
 
     void setDocument(ScoreDocument* document);
     void setChangedCallback(std::function<void()> callback);
+    void setSelectionChangedCallback(std::function<void(std::size_t)> callback);
+    void setPlaybackActive(bool active);
+    void setPlayheadTick(std::size_t tickIndex, bool centerIfFollowing = true);
+    [[nodiscard]] std::size_t selectedTick() const noexcept;
+    [[nodiscard]] std::size_t displayedTickCount() const;
 
 private:
     struct CellLayout {
@@ -43,7 +48,10 @@ private:
     void setScrollOffset(int value);
     void scrollBy(int delta);
     void ensureSelectionVisible();
+    void centerSelection();
+    void markUserScroll();
     void notifyChanged();
+    void notifySelectionChanged();
     void moveSelection(long long beatDelta);
     [[nodiscard]] std::size_t displayedRowCount() const;
     [[nodiscard]] std::vector<CellLayout> calculateLayout(int clientWidth) const;
@@ -52,11 +60,14 @@ private:
     HWND window_{nullptr};
     ScoreDocument* document_{nullptr};
     std::function<void()> changedCallback_;
+    std::function<void(std::size_t)> selectionChangedCallback_;
     HFONT noteFont_{nullptr};
     HFONT smallFont_{nullptr};
     std::size_t selectedMeasure_{0};
     std::size_t selectedBeat_{0};
     int scrollOffset_{0};
+    bool playbackActive_{false};
+    bool followPlayback_{true};
 };
 
 }  // namespace yuanqin::ui

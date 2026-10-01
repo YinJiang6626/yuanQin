@@ -12,6 +12,7 @@ namespace yuanqin::playback {
 struct PlaybackOptions {
     double bpm{80.0};
     std::chrono::milliseconds startDelay{0};
+    std::size_t startTick{0};
 
     // Retains the timing used by the original program for bracketed pipa notes.
     double arpeggioNoteSpanTicks{2.0};

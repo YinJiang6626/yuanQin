@@ -1,12 +1,22 @@
 #include "MainWindow.h"
 
+#include "yuanqin/core/ScoreParser.h"
+#include "yuanqin/playback/GenshinWindowTarget.h"
+#include "yuanqin/playback/MusicPlayer.h"
+#include "yuanqin/playback/VirtualHidKeySender.h"
+
 #include <commdlg.h>
 #include <windowsx.h>
 
 #include <algorithm>
 #include <array>
+#include <chrono>
+#include <cmath>
 #include <fstream>
+#include <iomanip>
 #include <iterator>
+#include <memory>
+#include <sstream>
 #include <string>
 #include <utility>
 
@@ -15,8 +25,11 @@ namespace {
 
 constexpr wchar_t kMainWindowClassName[] = L"YuanQinMainWindow";
 constexpr int kHeaderHeight = 160;
-constexpr int kFooterHeight = 32;
+constexpr int kFooterHeight = 86;
 constexpr int kEditorControlId = 1001;
+constexpr int kBpmControlId = 1002;
+constexpr UINT kPlaybackProgressMessage = WM_APP + 11;
+constexpr UINT kPlaybackCompleteMessage = WM_APP + 12;
 
 constexpr COLORREF kDeepTeal = RGB(17, 73, 94);
 constexpr COLORREF kOcean = RGB(31, 139, 174);
@@ -78,7 +91,19 @@ std::filesystem::path scoreDirectory() {
         : std::filesystem::current_path();
 }
 
+std::wstring formatTime(std::size_t tick, double bpm) {
+    const auto seconds = static_cast<unsigned long long>(
+        bpm > 0.0 ? static_cast<double>(tick) * 60.0 / bpm / 4.0 : 0.0);
+    std::wostringstream text;
+    text << seconds / 60 << L':' << std::setfill(L'0') << std::setw(2) << seconds % 60;
+    return text.str();
+}
+
 }  // namespace
+
+MainWindow::~MainWindow() {
+    stopPlayback();
+}
 
 bool MainWindow::create(HINSTANCE instance, int showCommand) {
     instance_ = instance;
@@ -103,12 +128,16 @@ bool MainWindow::create(HINSTANCE instance, int showCommand) {
     const int height = 840;
     const int x = std::max(0, (GetSystemMetrics(SM_CXSCREEN) - width) / 2);
     const int y = std::max(0, (GetSystemMetrics(SM_CYSCREEN) - height) / 2);
-    window_ = CreateWindowExW(0, kMainWindowClassName, L"幽歌琴谱", WS_OVERLAPPEDWINDOW |
-                              WS_CLIPCHILDREN, x, y, width, height, nullptr, nullptr, instance, this);
+    window_ = CreateWindowExW(WS_EX_LAYERED | WS_EX_TOPMOST, kMainWindowClassName,
+                              L"幽歌琴谱", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
+                              x, y, width, height, nullptr, nullptr, instance, this);
     if (!window_) {
         return false;
     }
 
+    applyWindowOpacity();
+    SetWindowPos(window_, HWND_TOPMOST, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     ShowWindow(window_, showCommand);
     UpdateWindow(window_);
     return true;
@@ -160,10 +189,38 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
             if (!editor_.create(window_, instance_, kEditorControlId)) {
                 return -1;
             }
+            bpmEdit_ = CreateWindowExW(0, L"EDIT", L"80",
+                                       WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_NUMBER | ES_CENTER,
+                                       0, 0, 0, 0, window_,
+                                       reinterpret_cast<HMENU>(static_cast<INT_PTR>(kBpmControlId)),
+                                       instance_, nullptr);
+            if (!bpmEdit_) {
+                return -1;
+            }
+            SendMessageW(bpmEdit_, WM_SETFONT, reinterpret_cast<WPARAM>(interfaceFont_), TRUE);
+            bpmEditBrush_ = CreateSolidBrush(RGB(232, 247, 249));
             editor_.setChangedCallback([this] { markActiveDocumentChanged(); });
+            editor_.setSelectionChangedCallback(
+                [this](std::size_t tickIndex) { onEditorSelectionChanged(tickIndex); });
             newDocument();
             layoutChildren();
             return 0;
+
+        case WM_CTLCOLOREDIT:
+            if (reinterpret_cast<HWND>(lParam) == bpmEdit_) {
+                const HDC context = reinterpret_cast<HDC>(wParam);
+                SetTextColor(context, kDeepTeal);
+                SetBkColor(context, RGB(232, 247, 249));
+                return reinterpret_cast<LRESULT>(bpmEditBrush_);
+            }
+            break;
+
+        case WM_COMMAND:
+            if (LOWORD(wParam) == kBpmControlId && HIWORD(wParam) == EN_CHANGE) {
+                InvalidateRect(window_, nullptr, FALSE);
+                return 0;
+            }
+            break;
 
         case WM_GETMINMAXINFO: {
             auto* info = reinterpret_cast<MINMAXINFO*>(lParam);
@@ -179,12 +236,64 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
         case WM_ERASEBKGND:
             return 1;
 
+        case WM_MOUSEACTIVATE: {
+            if (LOWORD(lParam) == HTCAPTION) {
+                const HWND gameWindow = playback::GenshinWindowTarget::find();
+                if (playbackRunning_ ||
+                    (gameWindow && GetForegroundWindow() == gameWindow)) {
+                    return MA_NOACTIVATE;
+                }
+            }
+            POINT cursor{};
+            if (GetCursorPos(&cursor)) {
+                ScreenToClient(window_, &cursor);
+                if (shouldHandleWithoutActivation(cursor)) {
+                    // Playback controls must remain usable while an exclusive-fullscreen
+                    // game owns the foreground window. The click is delivered, but this
+                    // overlay does not become active and therefore does not minimize it.
+                    return MA_NOACTIVATE;
+                }
+            }
+            break;
+        }
+
         case WM_PAINT:
             paint();
             return 0;
 
         case WM_LBUTTONDOWN: {
             const POINT point{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+            RECT opacity = opacityBounds();
+            RECT opacityHit = opacity;
+            InflateRect(&opacityHit, 0, 12);
+            if (PtInRect(&opacityHit, point)) {
+                draggingOpacity_ = true;
+                setWindowOpacityFromX(point.x);
+                SetCapture(window_);
+                return 0;
+            }
+            const RECT playPause = playPauseBounds();
+            if (PtInRect(&playPause, point)) {
+                togglePlayback();
+                return 0;
+            }
+            const RECT fromBeginning = playFromBeginningBounds();
+            if (PtInRect(&fromBeginning, point)) {
+                playFromBeginning();
+                return 0;
+            }
+            const RECT progress = progressBounds();
+            RECT progressHit = progress;
+            InflateRect(&progressHit, 0, 12);
+            if (PtInRect(&progressHit, point)) {
+                draggingProgress_ = true;
+                dragWasPlaying_ = playbackRunning_;
+                draggedTick_ = progressTickFromX(point.x);
+                editor_.setPlayheadTick(draggedTick_, false);
+                SetCapture(window_);
+                InvalidateRect(window_, nullptr, FALSE);
+                return 0;
+            }
             for (const auto& item : toolbarItems()) {
                 if (PtInRect(&item.bounds, point)) {
                     invoke(item.action);
@@ -201,10 +310,85 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
                     return 0;
                 }
             }
+            const RECT dragArea = headerDragBounds();
+            if (PtInRect(&dragArea, point)) {
+                draggingWindow_ = GetCursorPos(&windowDragStartCursor_) != FALSE &&
+                                  GetWindowRect(window_, &windowDragStartBounds_) != FALSE;
+                if (draggingWindow_) {
+                    SetCapture(window_);
+                }
+                return 0;
+            }
             return 0;
         }
 
+        case WM_MOUSEMOVE:
+            if (draggingWindow_) {
+                POINT cursor{};
+                if (GetCursorPos(&cursor)) {
+                    const int x = windowDragStartBounds_.left +
+                                  cursor.x - windowDragStartCursor_.x;
+                    const int y = windowDragStartBounds_.top +
+                                  cursor.y - windowDragStartCursor_.y;
+                    SetWindowPos(window_, HWND_TOPMOST, x, y, 0, 0,
+                                 SWP_NOSIZE | SWP_NOACTIVATE);
+                }
+                return 0;
+            }
+            if (draggingOpacity_) {
+                setWindowOpacityFromX(GET_X_LPARAM(lParam));
+                return 0;
+            }
+            if (draggingProgress_) {
+                draggedTick_ = progressTickFromX(GET_X_LPARAM(lParam));
+                editor_.setPlayheadTick(draggedTick_, false);
+                InvalidateRect(window_, nullptr, FALSE);
+                return 0;
+            }
+            break;
+
+        case WM_LBUTTONUP:
+            if (draggingWindow_) {
+                draggingWindow_ = false;
+                ReleaseCapture();
+                return 0;
+            }
+            if (draggingOpacity_) {
+                setWindowOpacityFromX(GET_X_LPARAM(lParam));
+                draggingOpacity_ = false;
+                ReleaseCapture();
+                return 0;
+            }
+            if (draggingProgress_) {
+                draggedTick_ = progressTickFromX(GET_X_LPARAM(lParam));
+                draggingProgress_ = false;
+                ReleaseCapture();
+                seekTo(draggedTick_, dragWasPlaying_);
+                return 0;
+            }
+            break;
+
+        case WM_CAPTURECHANGED:
+            draggingWindow_ = false;
+            draggingOpacity_ = false;
+            if (draggingProgress_) {
+                draggingProgress_ = false;
+                seekTo(draggedTick_, dragWasPlaying_);
+                return 0;
+            }
+            break;
+
+        case kPlaybackProgressMessage:
+            handlePlaybackProgress(static_cast<std::uint64_t>(wParam),
+                                   static_cast<std::size_t>(lParam));
+            return 0;
+
+        case kPlaybackCompleteMessage:
+            handlePlaybackComplete(static_cast<std::uint64_t>(wParam), static_cast<int>(lParam));
+            return 0;
+
         case WM_CLOSE:
+            stopPlayback();
             for (std::size_t index = documents_.size(); index > 0; --index) {
                 if (!confirmClose(index - 1)) {
                     return 0;
@@ -214,6 +398,11 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
             return 0;
 
         case WM_DESTROY:
+            stopPlayback();
+            if (bpmEditBrush_) {
+                DeleteObject(bpmEditBrush_);
+                bpmEditBrush_ = nullptr;
+            }
             destroyFonts();
             PostQuitMessage(0);
             return 0;
@@ -246,13 +435,79 @@ void MainWindow::destroyFonts() {
 }
 
 void MainWindow::layoutChildren() {
-    if (!window_ || !editor_.handle()) {
+    if (!window_ || !editor_.handle() || !bpmEdit_) {
         return;
     }
     RECT client{};
     GetClientRect(window_, &client);
     MoveWindow(editor_.handle(), 0, kHeaderHeight, client.right,
                std::max(0, static_cast<int>(client.bottom) - kHeaderHeight - kFooterHeight), TRUE);
+    MoveWindow(bpmEdit_, 178, client.bottom - kFooterHeight + 43, 54, 27, TRUE);
+}
+
+RECT MainWindow::playPauseBounds() const {
+    RECT client{};
+    GetClientRect(window_, &client);
+    return {25, client.bottom - kFooterHeight + 36, 67, client.bottom - 10};
+}
+
+RECT MainWindow::playFromBeginningBounds() const {
+    RECT client{};
+    GetClientRect(window_, &client);
+    return {75, client.bottom - kFooterHeight + 36, 117, client.bottom - 10};
+}
+
+RECT MainWindow::progressBounds() const {
+    RECT client{};
+    GetClientRect(window_, &client);
+    return {264, client.bottom - 36, std::max(284L, client.right - 92), client.bottom - 28};
+}
+
+RECT MainWindow::opacityBounds() const {
+    RECT client{};
+    GetClientRect(window_, &client);
+    const LONG footerTop = client.bottom - kFooterHeight;
+    return {std::max(430L, client.right - 170), footerTop + 13,
+            client.right - 28, footerTop + 19};
+}
+
+RECT MainWindow::headerDragBounds() const {
+    RECT client{};
+    GetClientRect(window_, &client);
+    return {18, 76, std::max(19L, client.right - 18), 104};
+}
+
+bool MainWindow::shouldHandleWithoutActivation(POINT clientPoint) const {
+    RECT playPause = playPauseBounds();
+    RECT fromBeginning = playFromBeginningBounds();
+    RECT progress = progressBounds();
+    RECT opacity = opacityBounds();
+    const RECT headerDrag = headerDragBounds();
+    InflateRect(&progress, 0, 12);
+    InflateRect(&opacity, 0, 12);
+    if (PtInRect(&headerDrag, clientPoint) || PtInRect(&playPause, clientPoint) ||
+        PtInRect(&fromBeginning, clientPoint) ||
+        PtInRect(&progress, clientPoint) || PtInRect(&opacity, clientPoint)) {
+        return true;
+    }
+
+    if (!editor_.handle()) {
+        return false;
+    }
+    RECT editorBounds{};
+    GetWindowRect(editor_.handle(), &editorBounds);
+    MapWindowPoints(nullptr, window_, reinterpret_cast<POINT*>(&editorBounds), 2);
+    if (!PtInRect(&editorBounds, clientPoint)) {
+        return false;
+    }
+    if (playbackRunning_) {
+        return true;
+    }
+
+    // A single cell click may move the paused play position without taking
+    // exclusive-fullscreen focus away from a currently foreground game.
+    const HWND gameWindow = playback::GenshinWindowTarget::find();
+    return gameWindow && GetForegroundWindow() == gameWindow;
 }
 
 std::vector<MainWindow::ToolbarItem> MainWindow::toolbarItems() const {
@@ -375,15 +630,118 @@ void MainWindow::paint() {
         DrawTextW(context, L"×", -1, &close, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
 
+    SelectObject(context, smallFont_);
+    SetTextColor(context, RGB(181, 229, 235));
+    RECT dragHint = headerDragBounds();
+    DrawTextW(context, L"─  拖动窗口  ─", -1, &dragHint,
+              DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
     RECT footer{0, client.bottom - kFooterHeight, client.right, client.bottom};
     const HBRUSH footerBrush = CreateSolidBrush(RGB(23, 83, 101));
     FillRect(context, &footer, footerBrush);
     DeleteObject(footerBrush);
     SelectObject(context, smallFont_);
     SetTextColor(context, RGB(215, 241, 244));
-    RECT status{26, footer.top, client.right - 26, footer.bottom};
+    RECT status{26, footer.top + 4, std::max(260L, client.right - 340), footer.top + 28};
     DrawTextW(context, statusMessage_.c_str(), -1, &status,
               DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+    const RECT opacity = opacityBounds();
+    const std::wstring opacityText = L"界面透明度 " +
+                                     std::to_wstring(windowOpacityPercent_) + L"%";
+    RECT opacityLabel{opacity.left - 158, footer.top + 2, opacity.left - 10, footer.top + 29};
+    SetTextColor(context, RGB(215, 241, 244));
+    DrawTextW(context, opacityText.c_str(), -1, &opacityLabel,
+              DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+    fillRoundedRect(context, opacity, 6, RGB(69, 118, 133));
+    const double opacityRatio = static_cast<double>(windowOpacityPercent_ - 25) / 75.0;
+    RECT opacityFill = opacity;
+    opacityFill.right = opacity.left + static_cast<LONG>(std::round(
+        static_cast<double>(opacity.right - opacity.left) * opacityRatio));
+    if (opacityFill.right > opacityFill.left) {
+        fillRoundedRect(context, opacityFill, 6, RGB(91, 211, 211));
+    }
+    const int opacityHandleX = opacityFill.right;
+    const HBRUSH opacityHandleBrush = CreateSolidBrush(RGB(226, 219, 249));
+    const auto oldOpacityBrush = SelectObject(context, opacityHandleBrush);
+    const auto oldOpacityPen = SelectObject(context, GetStockObject(NULL_PEN));
+    Ellipse(context, opacityHandleX - 6, opacity.top - 4,
+            opacityHandleX + 6, opacity.bottom + 4);
+    SelectObject(context, oldOpacityPen);
+    SelectObject(context, oldOpacityBrush);
+    DeleteObject(opacityHandleBrush);
+
+    const RECT playPause = playPauseBounds();
+    const RECT fromBeginning = playFromBeginningBounds();
+    fillRoundedRect(context, playPause, 14, playbackRunning_ ? RGB(205, 238, 239)
+                                                             : RGB(231, 246, 248));
+    fillRoundedRect(context, fromBeginning, 14, RGB(231, 246, 248));
+
+    const HBRUSH iconBrush = CreateSolidBrush(playbackRunning_ ? RGB(82, 75, 142) : kOcean);
+    const auto previousBrush = SelectObject(context, iconBrush);
+    const auto previousPen = SelectObject(context, GetStockObject(NULL_PEN));
+    if (playbackRunning_) {
+        RECT leftBar{playPause.left + 13, playPause.top + 11,
+                     playPause.left + 18, playPause.bottom - 11};
+        RECT rightBar{playPause.right - 18, playPause.top + 11,
+                      playPause.right - 13, playPause.bottom - 11};
+        FillRect(context, &leftBar, iconBrush);
+        FillRect(context, &rightBar, iconBrush);
+    } else {
+        const POINT triangle[]{{playPause.left + 15, playPause.top + 10},
+                               {playPause.right - 12, (playPause.top + playPause.bottom) / 2},
+                               {playPause.left + 15, playPause.bottom - 10}};
+        Polygon(context, triangle, 3);
+    }
+    RECT startBar{fromBeginning.left + 10, fromBeginning.top + 10,
+                  fromBeginning.left + 14, fromBeginning.bottom - 10};
+    FillRect(context, &startBar, iconBrush);
+    const POINT startTriangle[]{{fromBeginning.left + 18, fromBeginning.top + 10},
+                                {fromBeginning.right - 9,
+                                 (fromBeginning.top + fromBeginning.bottom) / 2},
+                                {fromBeginning.left + 18, fromBeginning.bottom - 10}};
+    Polygon(context, startTriangle, 3);
+    SelectObject(context, previousPen);
+    SelectObject(context, previousBrush);
+    DeleteObject(iconBrush);
+
+    SelectObject(context, smallFont_);
+    SetTextColor(context, RGB(184, 226, 231));
+    RECT bpmLabel{131, footer.top + 40, 174, footer.bottom - 10};
+    DrawTextW(context, L"BPM", -1, &bpmLabel, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+    const RECT progress = progressBounds();
+    RECT progressTrack = progress;
+    fillRoundedRect(context, progressTrack, 8, RGB(69, 118, 133));
+    const std::size_t visibleTick = draggingProgress_ ? draggedTick_ : transportTick_;
+    const double ratio = transportTotalTicks_ <= 1
+        ? 0.0
+        : std::clamp(static_cast<double>(visibleTick) /
+                         static_cast<double>(transportTotalTicks_ - 1),
+                     0.0, 1.0);
+    RECT progressFill = progress;
+    progressFill.right = progress.left + static_cast<LONG>(
+        std::round(static_cast<double>(progress.right - progress.left) * ratio));
+    if (progressFill.right > progressFill.left) {
+        fillRoundedRect(context, progressFill, 8, RGB(91, 211, 211));
+    }
+    const int handleX = progress.left + static_cast<int>(
+        std::round(static_cast<double>(progress.right - progress.left) * ratio));
+    const HBRUSH handleBrush = CreateSolidBrush(RGB(226, 219, 249));
+    const auto oldHandleBrush = SelectObject(context, handleBrush);
+    const auto oldHandlePen = SelectObject(context, GetStockObject(NULL_PEN));
+    Ellipse(context, handleX - 7, progress.top - 4, handleX + 7, progress.bottom + 4);
+    SelectObject(context, oldHandlePen);
+    SelectObject(context, oldHandleBrush);
+    DeleteObject(handleBrush);
+
+    const double bpm = playbackBpm();
+    const std::wstring timeText = formatTime(std::min(visibleTick, transportTotalTicks_), bpm) +
+                                  L" / " + formatTime(transportTotalTicks_, bpm);
+    RECT timeRect{progress.right + 8, footer.top + 34, client.right - 10, footer.bottom - 8};
+    SetTextColor(context, RGB(213, 239, 243));
+    DrawTextW(context, timeText.c_str(), -1, &timeRect,
+              DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
     BitBlt(windowContext, 0, 0, client.right, client.bottom, context, 0, 0, SRCCOPY);
     SelectObject(context, oldBitmap);
@@ -486,6 +844,9 @@ bool MainWindow::confirmClose(std::size_t index) {
 }
 
 void MainWindow::closeDocument(std::size_t index) {
+    if (index == activeDocument_ && playbackRunning_) {
+        stopPlayback();
+    }
     if (index >= documents_.size() || !confirmClose(index)) {
         return;
     }
@@ -506,8 +867,14 @@ void MainWindow::setActiveDocument(std::size_t index) {
     if (index >= documents_.size()) {
         return;
     }
+    if (playbackRunning_) {
+        stopPlayback();
+    }
     activeDocument_ = index;
     editor_.setDocument(&documents_[activeDocument_].document);
+    transportTick_ = 0;
+    transportTotalTicks_ = activeScoreTickCount();
+    editor_.setPlayheadTick(0, false);
     updateWindowTitle();
     InvalidateRect(window_, nullptr, FALSE);
 }
@@ -517,14 +884,257 @@ void MainWindow::markActiveDocumentChanged() {
         return;
     }
     documents_[activeDocument_].modified = true;
+    transportTotalTicks_ = std::max<std::size_t>(1, activeScoreTickCount());
     updateWindowTitle();
     setStatus(L"修改仅保存在内存中 · Ctrl+S 保存 · Ctrl+Shift+S 另存为");
 }
 
+void MainWindow::onEditorSelectionChanged(std::size_t tickIndex) {
+    transportTick_ = tickIndex;
+    transportTotalTicks_ = std::max({std::size_t{1}, activeScoreTickCount(), tickIndex + 1});
+    if (playbackRunning_) {
+        seekTo(tickIndex, true);
+    } else {
+        InvalidateRect(window_, nullptr, FALSE);
+    }
+}
+
+double MainWindow::playbackBpm() const {
+    if (!bpmEdit_) {
+        return 80.0;
+    }
+    wchar_t text[32]{};
+    GetWindowTextW(bpmEdit_, text, static_cast<int>(std::size(text)));
+    const double value = std::wcstod(text, nullptr);
+    return value > 0.0 ? value : 0.0;
+}
+
+std::size_t MainWindow::activeScoreTickCount() const {
+    if (activeDocument_ >= documents_.size()) {
+        return 1;
+    }
+    const std::size_t scoreTicks = documents_[activeDocument_].document.measureCount() *
+                                   ui::kBeatsPerMeasure;
+    return scoreTicks > 0 ? scoreTicks : editor_.displayedTickCount();
+}
+
+std::size_t MainWindow::progressTickFromX(int x) const {
+    const RECT progress = progressBounds();
+    const double ratio = std::clamp(
+        static_cast<double>(x - progress.left) /
+            static_cast<double>(std::max(1L, progress.right - progress.left)),
+        0.0, 1.0);
+    if (transportTotalTicks_ <= 1) {
+        return 0;
+    }
+    return std::min(transportTotalTicks_ - 1,
+                    static_cast<std::size_t>(std::llround(
+                        ratio * static_cast<double>(transportTotalTicks_ - 1))));
+}
+
+void MainWindow::setWindowOpacityFromX(int x) {
+    const RECT bounds = opacityBounds();
+    const double ratio = std::clamp(
+        static_cast<double>(x - bounds.left) /
+            static_cast<double>(std::max(1L, bounds.right - bounds.left)),
+        0.0, 1.0);
+    windowOpacityPercent_ = 25 + static_cast<int>(std::lround(ratio * 75.0));
+    applyWindowOpacity();
+    InvalidateRect(window_, nullptr, FALSE);
+}
+
+void MainWindow::applyWindowOpacity() {
+    if (!window_) {
+        return;
+    }
+    const BYTE alpha = static_cast<BYTE>(std::lround(
+        255.0 * static_cast<double>(windowOpacityPercent_) / 100.0));
+    SetLayeredWindowAttributes(window_, 0, alpha, LWA_ALPHA);
+}
+
+void MainWindow::startPlayback(std::size_t tickIndex) {
+    if (activeDocument_ >= documents_.size()) {
+        return;
+    }
+
+    const double bpm = playbackBpm();
+    if (bpm <= 0.0) {
+        setStatus(L"请输入大于 0 的 BPM");
+        SetFocus(bpmEdit_);
+        return;
+    }
+
+    auto parseResult = core::ScoreParser::parseText(
+        documents_[activeDocument_].document.toText());
+    if (!parseResult.success || !parseResult.score.hasNotes()) {
+        setStatus(L"当前乐谱没有可播放的音符");
+        return;
+    }
+
+    const std::size_t requestedTick = tickIndex;
+    transportTotalTicks_ = parseResult.score.tickCount();
+    if (transportTotalTicks_ == 0) {
+        return;
+    }
+
+    if (requestedTick >= transportTotalTicks_) {
+        if (playbackRunning_) {
+            stopPlayback();
+        }
+        transportTick_ = requestedTick;
+        transportTotalTicks_ = std::max({transportTotalTicks_, activeScoreTickCount(),
+                                         requestedTick + 1});
+        editor_.setPlayheadTick(requestedTick, false);
+        setStatus(L"当前位置之后没有可播放的音符");
+        return;
+    }
+    tickIndex = requestedTick;
+
+    bool hasRemainingNote = false;
+    for (std::size_t index = tickIndex; index < parseResult.score.tickCount(); ++index) {
+        if (parseResult.score.ticks()[index]) {
+            hasRemainingNote = true;
+            break;
+        }
+    }
+    if (!hasRemainingNote) {
+        if (playbackRunning_) {
+            stopPlayback();
+        }
+        transportTick_ = tickIndex;
+        editor_.setPlayheadTick(tickIndex, false);
+        setStatus(L"当前位置之后没有可播放的音符");
+        return;
+    }
+
+    stopPlayback();
+    auto keySender = std::make_unique<playback::VirtualHidKeySender>();
+    if (!keySender->isOpen()) {
+        setStatus(L"虚拟 HID 驱动未安装或未启动 · 请先安装 driver/YuanqinVhid");
+        return;
+    }
+    const HWND gameWindow = playback::GenshinWindowTarget::find();
+    if (!gameWindow || !playback::GenshinWindowTarget::activate(gameWindow, window_)) {
+        setStatus(L"未找到或无法激活原神窗口 · 请先启动原神并保持窗口化或无边框模式");
+        return;
+    }
+    transportTick_ = tickIndex;
+    editor_.setPlaybackActive(true);
+    editor_.setPlayheadTick(tickIndex, true);
+    EnableWindow(bpmEdit_, FALSE);
+    playbackRunning_ = true;
+    const std::uint64_t generation = ++playbackGeneration_;
+    playback::PlaybackOptions options;
+    options.bpm = bpm;
+    options.startTick = tickIndex;
+    core::Score score = std::move(parseResult.score);
+
+    playbackThread_ = std::jthread(
+        [this, generation, keySender = std::move(keySender), score = std::move(score), options](
+            std::stop_token stopToken) mutable {
+            playback::MusicPlayer player;
+            const auto result = player.play(
+                score, *keySender, options,
+                [&stopToken] { return stopToken.stop_requested(); },
+                [this, generation](std::size_t currentTick) {
+                    PostMessageW(window_, kPlaybackProgressMessage,
+                                 static_cast<WPARAM>(generation),
+                                 static_cast<LPARAM>(currentTick));
+                });
+            PostMessageW(window_, kPlaybackCompleteMessage, static_cast<WPARAM>(generation),
+                         static_cast<LPARAM>(result.status));
+        });
+    setStatus(L"正在通过虚拟 HID 键盘播放 · 乐谱编辑已锁定 · 点击其他拍位可立即跳播");
+    InvalidateRect(window_, nullptr, FALSE);
+}
+
+void MainWindow::stopPlayback(bool unlockEditor) {
+    ++playbackGeneration_;
+    if (playbackThread_.joinable()) {
+        playbackThread_.request_stop();
+        playbackThread_.join();
+    }
+    playbackRunning_ = false;
+    if (unlockEditor) {
+        editor_.setPlaybackActive(false);
+        if (bpmEdit_) {
+            EnableWindow(bpmEdit_, TRUE);
+        }
+        InvalidateRect(window_, nullptr, FALSE);
+    }
+}
+
+void MainWindow::togglePlayback() {
+    if (playbackRunning_) {
+        stopPlayback();
+        setStatus(L"已暂停 · 可编辑乐谱或拖动进度位置");
+    } else {
+        const std::size_t startTick = transportTick_ >= transportTotalTicks_ ? 0 : transportTick_;
+        startPlayback(startTick);
+    }
+}
+
+void MainWindow::playFromBeginning() {
+    startPlayback(0);
+}
+
+void MainWindow::seekTo(std::size_t tickIndex, bool keepPlaying) {
+    tickIndex = std::min(tickIndex, transportTotalTicks_ > 0 ? transportTotalTicks_ - 1 : 0);
+    if (keepPlaying) {
+        startPlayback(tickIndex);
+    } else {
+        if (playbackRunning_) {
+            stopPlayback();
+        }
+        transportTick_ = tickIndex;
+        editor_.setPlayheadTick(tickIndex, false);
+        InvalidateRect(window_, nullptr, FALSE);
+    }
+}
+
+void MainWindow::handlePlaybackProgress(std::uint64_t generation, std::size_t tickIndex) {
+    if (generation != playbackGeneration_ || !playbackRunning_) {
+        return;
+    }
+    transportTick_ = std::min(tickIndex, transportTotalTicks_);
+    if (!draggingProgress_) {
+        editor_.setPlayheadTick(transportTick_, true);
+    }
+    InvalidateRect(window_, nullptr, FALSE);
+}
+
+void MainWindow::handlePlaybackComplete(std::uint64_t generation, int status) {
+    if (generation != playbackGeneration_) {
+        return;
+    }
+    if (playbackThread_.joinable()) {
+        playbackThread_.join();
+    }
+    playbackRunning_ = false;
+    editor_.setPlaybackActive(false);
+    EnableWindow(bpmEdit_, TRUE);
+    if (status == static_cast<int>(playback::PlaybackStatus::Completed)) {
+        transportTick_ = transportTotalTicks_;
+        if (transportTotalTicks_ > 0) {
+            editor_.setPlayheadTick(transportTotalTicks_ - 1, false);
+        }
+        setStatus(L"播放完成");
+    } else if (status == static_cast<int>(playback::PlaybackStatus::SendFailed)) {
+        setStatus(L"播放中断：虚拟 HID 驱动通信失败 · 请检查设备管理器中的 Yuanqin Virtual HID Keyboard");
+    }
+    InvalidateRect(window_, nullptr, FALSE);
+}
+
 void MainWindow::invoke(ToolbarAction action) {
     switch (action) {
-        case ToolbarAction::NewFile: newDocument(); break;
-        case ToolbarAction::OpenFile: openDocument(); break;
+        case ToolbarAction::NewFile:
+            if (playbackRunning_) stopPlayback();
+            newDocument();
+            break;
+        case ToolbarAction::OpenFile:
+            if (playbackRunning_) stopPlayback();
+            openDocument();
+            break;
         case ToolbarAction::Save:
             if (!documents_.empty()) saveDocument(activeDocument_);
             break;
