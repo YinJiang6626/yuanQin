@@ -13,6 +13,7 @@ namespace yuanqin::ui {
 
 class ScoreEditor {
 public:
+    enum class Hand { Right, Left };
     ScoreEditor() = default;
     ~ScoreEditor();
 
@@ -24,6 +25,8 @@ public:
     [[nodiscard]] HWND handle() const noexcept;
 
     void setDocument(ScoreDocument* document);
+    void setCompositionDocuments(ScoreDocument* right, ScoreDocument* left);
+    void setActiveHand(Hand hand);
     void setSelectionRange(std::size_t anchorTick, std::size_t caretTick);
     void setChangedCallback(std::function<void()> callback);
     void setBeforeChangeCallback(std::function<void()> callback);
@@ -37,12 +40,14 @@ public:
     [[nodiscard]] std::size_t selectionStartTick() const noexcept;
     [[nodiscard]] std::size_t selectionEndTick() const noexcept;
     [[nodiscard]] std::size_t displayedTickCount() const;
+    [[nodiscard]] Hand activeHand() const noexcept;
 
 private:
     struct CellLayout {
         RECT bounds{};
         std::size_t measureIndex{};
         std::size_t beatIndex{};
+        Hand hand{Hand::Right};
     };
 
     static LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wParam,
@@ -77,9 +82,18 @@ private:
     [[nodiscard]] std::size_t displayedRowCount() const;
     [[nodiscard]] std::vector<CellLayout> calculateLayout(int clientWidth) const;
     [[nodiscard]] bool selectAt(POINT point);
+    [[nodiscard]] ScoreDocument* activeDocument() noexcept;
+    [[nodiscard]] const ScoreDocument* activeDocument() const noexcept;
+    [[nodiscard]] ScoreDocument* documentFor(Hand hand) noexcept;
+    [[nodiscard]] const ScoreDocument* documentFor(Hand hand) const noexcept;
+    [[nodiscard]] bool isComposition() const noexcept;
+    [[nodiscard]] int rowHeight() const noexcept;
+    [[nodiscard]] int rowStride() const noexcept;
 
     HWND window_{nullptr};
     ScoreDocument* document_{nullptr};
+    ScoreDocument* leftDocument_{nullptr};
+    Hand activeHand_{Hand::Right};
     std::function<void()> changedCallback_;
     std::function<void()> beforeChangeCallback_;
     std::function<void(std::size_t)> selectionChangedCallback_;

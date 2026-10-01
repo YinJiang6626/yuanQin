@@ -19,6 +19,7 @@ constexpr int kPageMargin = 26;
 constexpr int kRowTop = 22;
 constexpr int kRowHeight = 88;
 constexpr int kRowGap = 14;
+constexpr int kCompositionRowHeight = 142;
 constexpr int kRowNumberWidth = 46;
 constexpr std::size_t kDefaultRows = 8;
 constexpr UINT_PTR kReturnToPlayheadTimer = 1;
@@ -86,6 +87,8 @@ HWND ScoreEditor::handle() const noexcept {
 
 void ScoreEditor::setDocument(ScoreDocument* document) {
     document_ = document;
+    leftDocument_ = nullptr;
+    activeHand_ = Hand::Right;
     selectedMeasure_ = 0;
     selectedBeat_ = 0;
     selectionAnchorTick_ = 0;
@@ -98,6 +101,34 @@ void ScoreEditor::setDocument(ScoreDocument* document) {
     updateScrollBar();
     if (window_) {
         InvalidateRect(window_, nullptr, FALSE);
+    }
+}
+
+void ScoreEditor::setCompositionDocuments(ScoreDocument* right, ScoreDocument* left) {
+    document_ = right;
+    leftDocument_ = left;
+    activeHand_ = Hand::Right;
+    selectedMeasure_ = 0;
+    selectedBeat_ = 0;
+    selectionAnchorTick_ = 0;
+    scrollOffset_ = 0;
+    playbackActive_ = false;
+    followPlayback_ = true;
+    if (window_) {
+        KillTimer(window_, kReturnToPlayheadTimer);
+    }
+    updateScrollBar();
+    if (window_) {
+        InvalidateRect(window_, nullptr, FALSE);
+    }
+}
+
+void ScoreEditor::setActiveHand(Hand hand) {
+    if (isComposition()) {
+        activeHand_ = hand;
+        if (window_) {
+            InvalidateRect(window_, nullptr, FALSE);
+        }
     }
 }
 
@@ -181,6 +212,38 @@ std::size_t ScoreEditor::selectionEndTick() const noexcept {
 
 std::size_t ScoreEditor::displayedTickCount() const {
     return displayedRowCount() * kMeasuresPerRow * kBeatsPerMeasure;
+}
+
+ScoreEditor::Hand ScoreEditor::activeHand() const noexcept {
+    return activeHand_;
+}
+
+ScoreDocument* ScoreEditor::activeDocument() noexcept {
+    return documentFor(activeHand_);
+}
+
+const ScoreDocument* ScoreEditor::activeDocument() const noexcept {
+    return documentFor(activeHand_);
+}
+
+ScoreDocument* ScoreEditor::documentFor(Hand hand) noexcept {
+    return hand == Hand::Left && leftDocument_ ? leftDocument_ : document_;
+}
+
+const ScoreDocument* ScoreEditor::documentFor(Hand hand) const noexcept {
+    return hand == Hand::Left && leftDocument_ ? leftDocument_ : document_;
+}
+
+bool ScoreEditor::isComposition() const noexcept {
+    return leftDocument_ != nullptr;
+}
+
+int ScoreEditor::rowHeight() const noexcept {
+    return isComposition() ? kCompositionRowHeight : kRowHeight;
+}
+
+int ScoreEditor::rowStride() const noexcept {
+    return rowHeight() + kRowGap;
 }
 
 LRESULT CALLBACK ScoreEditor::windowProcedure(HWND window, UINT message, WPARAM wParam,
@@ -316,7 +379,7 @@ LRESULT ScoreEditor::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
             break;
 
         case WM_KEYDOWN: {
-            if (!document_) {
+            if (!activeDocument()) {
                 return 0;
             }
             if (playbackActive_) {
@@ -410,9 +473,10 @@ void ScoreEditor::destroyFonts() {
 }
 
 std::size_t ScoreEditor::displayedRowCount() const {
-    const std::size_t documentRows = document_
-        ? (document_->measureCount() + kMeasuresPerRow - 1) / kMeasuresPerRow
-        : 0;
+    const auto rowsFor = [](const ScoreDocument* source) {
+        return source ? (source->measureCount() + kMeasuresPerRow - 1) / kMeasuresPerRow : 0;
+    };
+    const std::size_t documentRows = std::max(rowsFor(document_), rowsFor(leftDocument_));
     const std::size_t selectionRows = selectedMeasure_ / kMeasuresPerRow + 1;
     return std::max({kDefaultRows, documentRows + 1, selectionRows + 1});
 }
@@ -424,15 +488,14 @@ std::vector<ScoreEditor::CellLayout> ScoreEditor::calculateLayout(int clientWidt
     const int contentRight = cardRight - 12;
     const int availableWidth = std::max(240, contentRight - contentLeft);
 
-    for (std::size_t row = 0; row < displayedRowCount(); ++row) {
-        const int y = kRowTop + static_cast<int>(row) * (kRowHeight + kRowGap) - scrollOffset_;
+    const auto appendHand = [&](std::size_t row, int y, Hand hand, const ScoreDocument* source) {
         std::array<double, kMeasuresPerRow> measureWeights{};
         double measureWeightTotal = 0.0;
         for (std::size_t column = 0; column < kMeasuresPerRow; ++column) {
             const std::size_t measureIndex = row * kMeasuresPerRow + column;
             int units = 0;
             for (std::size_t beatIndex = 0; beatIndex < kBeatsPerMeasure; ++beatIndex) {
-                units += textUnits(document_ ? document_->beat(measureIndex, beatIndex) : std::string{});
+                units += textUnits(source ? source->beat(measureIndex, beatIndex) : std::string{});
             }
             measureWeights[column] = static_cast<double>(std::max(4, units));
             measureWeightTotal += measureWeights[column];
@@ -453,7 +516,7 @@ std::vector<ScoreEditor::CellLayout> ScoreEditor::calculateLayout(int clientWidt
             const std::size_t measureIndex = row * kMeasuresPerRow + column;
             for (std::size_t beatIndex = 0; beatIndex < kBeatsPerMeasure; ++beatIndex) {
                 beatWeights[beatIndex] = textUnits(
-                    document_ ? document_->beat(measureIndex, beatIndex) : std::string{});
+                    source ? source->beat(measureIndex, beatIndex) : std::string{});
                 beatWeightTotal += beatWeights[beatIndex];
             }
 
@@ -465,11 +528,32 @@ std::vector<ScoreEditor::CellLayout> ScoreEditor::calculateLayout(int clientWidt
                     ? measureRight
                     : beatX + beatBase + static_cast<int>(std::round(
                         beatFlexible * beatWeights[beatIndex] / beatWeightTotal));
-                cells.push_back({{beatX, y + 24, beatRight, y + kRowHeight - 10},
-                                 measureIndex, beatIndex});
+                cells.push_back({{beatX, y + 24, beatRight, y + rowHeight() - 10},
+                                 measureIndex, beatIndex, hand});
                 beatX = beatRight;
             }
             measureX = measureRight;
+        }
+    };
+
+    for (std::size_t row = 0; row < displayedRowCount(); ++row) {
+        const int y = kRowTop + static_cast<int>(row) * rowStride() - scrollOffset_;
+        if (isComposition()) {
+            const int handHeight = (rowHeight() - 20) / 2;
+            appendHand(row, y, Hand::Right, document_);
+            // Offset the cells that were just appended into the lower visual hand row.
+            const std::size_t firstLeft = cells.size();
+            appendHand(row, y + handHeight, Hand::Left, leftDocument_);
+            for (std::size_t index = firstLeft; index < cells.size(); ++index) {
+                // appendHand reserves its own row-height. Make the lower hand compact.
+                cells[index].bounds.bottom = y + rowHeight() - 10;
+            }
+            const std::size_t rightStart = firstLeft - kMeasuresPerRow * kBeatsPerMeasure;
+            for (std::size_t index = rightStart; index < firstLeft; ++index) {
+                cells[index].bounds.bottom = y + handHeight - 6;
+            }
+        } else {
+            appendHand(row, y, Hand::Right, document_);
         }
     }
     return cells;
@@ -493,14 +577,15 @@ void ScoreEditor::paint() {
     const auto cells = calculateLayout(client.right);
     const std::size_t rows = displayedRowCount();
     for (std::size_t row = 0; row < rows; ++row) {
-        const int y = kRowTop + static_cast<int>(row) * (kRowHeight + kRowGap) - scrollOffset_;
-        if (y + kRowHeight < 0 || y > client.bottom) {
+        const int rowHeightValue = rowHeight();
+        const int y = kRowTop + static_cast<int>(row) * rowStride() - scrollOffset_;
+        if (y + rowHeightValue < 0 || y > client.bottom) {
             continue;
         }
 
-        RECT shadow{kPageMargin + 2, y + 3, client.right - kPageMargin - 14, y + kRowHeight + 3};
+        RECT shadow{kPageMargin + 2, y + 3, client.right - kPageMargin - 14, y + rowHeightValue + 3};
         fillRoundedRect(context, shadow, 14, RGB(220, 235, 240));
-        RECT card{kPageMargin, y, client.right - kPageMargin - 16, y + kRowHeight};
+        RECT card{kPageMargin, y, client.right - kPageMargin - 16, y + rowHeightValue};
         fillRoundedRect(context, card, 14, kCard);
         const HPEN cardPen = CreatePen(PS_SOLID, 1, kCardBorder);
         const auto oldPen = SelectObject(context, cardPen);
@@ -513,11 +598,12 @@ void ScoreEditor::paint() {
         SelectObject(context, smallFont_);
         SetTextColor(context, kMutedInk);
         RECT numberRect{kPageMargin + 8, y + 27, kPageMargin + kRowNumberWidth - 4,
-                        y + kRowHeight - 10};
+                        y + rowHeightValue - 10};
         const std::wstring number = std::to_wstring(row + 1);
         DrawTextW(context, number.c_str(), -1, &numberRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
-        const auto firstCell = row * kMeasuresPerRow * kBeatsPerMeasure;
+        const auto cellsPerHandRow = kMeasuresPerRow * kBeatsPerMeasure;
+        const auto firstCell = row * cellsPerHandRow * (isComposition() ? 2 : 1);
         for (std::size_t column = 0; column < kMeasuresPerRow; ++column) {
             const auto measureFirst = firstCell + column * kBeatsPerMeasure;
             if (measureFirst >= cells.size()) {
@@ -529,6 +615,16 @@ void ScoreEditor::paint() {
             SetTextColor(context, RGB(130, 167, 180));
             DrawTextW(context, label.c_str(), -1, &labelRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         }
+        if (isComposition()) {
+            RECT rightLabel{kPageMargin + 8, y + 24, kPageMargin + kRowNumberWidth - 4,
+                            y + rowHeightValue / 2};
+            RECT leftLabel{kPageMargin + 8, y + rowHeightValue / 2, kPageMargin + kRowNumberWidth - 4,
+                           y + rowHeightValue - 8};
+            SetTextColor(context, RGB(91, 83, 146));
+            DrawTextW(context, L"R", -1, &rightLabel, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            SetTextColor(context, RGB(45, 137, 145));
+            DrawTextW(context, L"L", -1, &leftLabel, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        }
     }
 
     for (std::size_t index = 0; index < cells.size(); ++index) {
@@ -538,10 +634,14 @@ void ScoreEditor::paint() {
         }
 
         const std::size_t cellTick = cell.measureIndex * kBeatsPerMeasure + cell.beatIndex;
-        const bool selected = document_ && cellTick >= selectionStartTick() &&
-                              cellTick <= selectionEndTick();
-        const bool caret = document_ && cell.measureIndex == selectedMeasure_ &&
-                           cell.beatIndex == selectedBeat_;
+        const bool playbackCell = playbackActive_ && isComposition() &&
+                                  cellTick == selectedTick();
+        const bool selected = playbackCell || (activeDocument() && cell.hand == activeHand_ &&
+                              cellTick >= selectionStartTick() &&
+                              cellTick <= selectionEndTick());
+        const bool caret = playbackCell || (activeDocument() && cell.hand == activeHand_ &&
+                           cell.measureIndex == selectedMeasure_ &&
+                           cell.beatIndex == selectedBeat_);
         if (selected) {
             RECT highlight = cell.bounds;
             InflateRect(&highlight, -3, -5);
@@ -576,7 +676,8 @@ void ScoreEditor::paint() {
 
         RECT textRect = cell.bounds;
         InflateRect(&textRect, -4, -4);
-        const std::string value = document_ ? document_->beat(cell.measureIndex, cell.beatIndex)
+        const auto* source = documentFor(cell.hand);
+        const std::string value = source ? source->beat(cell.measureIndex, cell.beatIndex)
                                             : std::string{};
         SelectObject(context, noteFont_);
         if (value.empty()) {
@@ -605,7 +706,7 @@ void ScoreEditor::updateScrollBar() {
     RECT client{};
     GetClientRect(window_, &client);
     const int totalHeight = kRowTop * 2 + static_cast<int>(displayedRowCount()) *
-                            (kRowHeight + kRowGap) - kRowGap;
+                            rowStride() - kRowGap;
     SCROLLINFO info{};
     info.cbSize = sizeof(info);
     info.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
@@ -624,7 +725,7 @@ void ScoreEditor::setScrollOffset(int value) {
     RECT client{};
     GetClientRect(window_, &client);
     const int totalHeight = kRowTop * 2 + static_cast<int>(displayedRowCount()) *
-                            (kRowHeight + kRowGap) - kRowGap;
+                            rowStride() - kRowGap;
     const int maximum = std::max(0, totalHeight - static_cast<int>(client.bottom));
     const int next = std::clamp(value, 0, maximum);
     if (next != scrollOffset_) {
@@ -645,8 +746,8 @@ void ScoreEditor::ensureSelectionVisible() {
     RECT client{};
     GetClientRect(window_, &client);
     const int row = static_cast<int>(selectedMeasure_ / kMeasuresPerRow);
-    const int logicalTop = kRowTop + row * (kRowHeight + kRowGap);
-    const int logicalBottom = logicalTop + kRowHeight;
+    const int logicalTop = kRowTop + row * rowStride();
+    const int logicalBottom = logicalTop + rowHeight();
     if (logicalTop < scrollOffset_) {
         setScrollOffset(logicalTop - 6);
     } else if (logicalBottom > scrollOffset_ + client.bottom) {
@@ -661,7 +762,7 @@ void ScoreEditor::centerSelection() {
     RECT client{};
     GetClientRect(window_, &client);
     const int row = static_cast<int>(selectedMeasure_ / kMeasuresPerRow);
-    const int rowCenter = kRowTop + row * (kRowHeight + kRowGap) + kRowHeight / 2;
+    const int rowCenter = kRowTop + row * rowStride() + rowHeight() / 2;
     setScrollOffset(rowCenter - static_cast<int>(client.bottom) / 2);
 }
 
@@ -728,20 +829,21 @@ void ScoreEditor::moveSelection(long long beatDelta, bool extendSelection) {
 }
 
 void ScoreEditor::replaceSelection(const std::vector<std::string>& values, bool insertBefore) {
-    if (!document_ || values.empty()) {
+    auto* document = activeDocument();
+    if (!document || values.empty()) {
         return;
     }
     const std::size_t start = selectionStartTick();
     const std::size_t count = selectionEndTick() - start + 1;
     notifyBeforeChange();
     if (hasSelection()) {
-        document_->eraseBeats(start, count);
-        document_->insertBeats(start, values);
+        document->eraseBeats(start, count);
+        document->insertBeats(start, values);
     } else if (insertBefore) {
-        document_->insertBeats(start, values);
+        document->insertBeats(start, values);
     } else {
         for (std::size_t index = 0; index < values.size(); ++index) {
-            document_->setBeatAt(start + index, values[index]);
+            document->setBeatAt(start + index, values[index]);
         }
     }
     setCaretTick(start + values.size(), false);
@@ -749,7 +851,8 @@ void ScoreEditor::replaceSelection(const std::vector<std::string>& values, bool 
 }
 
 void ScoreEditor::typeNote(char note) {
-    if (!document_) {
+    auto* document = activeDocument();
+    if (!document) {
         return;
     }
     if (hasSelection() || insertMode_) {
@@ -757,10 +860,10 @@ void ScoreEditor::typeNote(char note) {
         return;
     }
 
-    const auto& before = document_->beat(selectedMeasure_, selectedBeat_);
+    const auto& before = document->beat(selectedMeasure_, selectedBeat_);
     const bool isGroup = before.size() >= 2 && (before.front() == '(' || before.front() == '[');
     notifyBeforeChange();
-    document_->typeNote(selectedMeasure_, selectedBeat_, note);
+    document->typeNote(selectedMeasure_, selectedBeat_, note);
     notifyChanged();
     if (!isGroup) {
         moveSelection(1, false);
@@ -768,7 +871,8 @@ void ScoreEditor::typeNote(char note) {
 }
 
 void ScoreEditor::beginGroup(char opening) {
-    if (!document_) {
+    auto* document = activeDocument();
+    if (!document) {
         return;
     }
     if (hasSelection() || insertMode_) {
@@ -776,24 +880,26 @@ void ScoreEditor::beginGroup(char opening) {
         return;
     }
     notifyBeforeChange();
-    document_->beginGroup(selectedMeasure_, selectedBeat_, opening);
+    document->beginGroup(selectedMeasure_, selectedBeat_, opening);
     notifyChanged();
 }
 
 void ScoreEditor::clearSelection() {
-    if (!document_) {
+    auto* document = activeDocument();
+    if (!document) {
         return;
     }
     const std::size_t start = selectionStartTick();
     const std::size_t count = selectionEndTick() - start + 1;
     notifyBeforeChange();
-    document_->clearBeats(start, count);
+    document->clearBeats(start, count);
     setCaretTick(start, false);
     notifyChanged();
 }
 
 void ScoreEditor::deleteSelectionBackward() {
-    if (!document_) {
+    auto* document = activeDocument();
+    if (!document) {
         return;
     }
     std::size_t start = selectionStartTick();
@@ -806,17 +912,18 @@ void ScoreEditor::deleteSelectionBackward() {
         count = 1;
     }
     notifyBeforeChange();
-    document_->eraseBeats(start, count);
+    document->eraseBeats(start, count);
     setCaretTick(start, false);
     notifyChanged();
 }
 
 void ScoreEditor::copySelectionToClipboard() const {
-    if (!document_ || !OpenClipboard(window_)) {
+    const auto* document = activeDocument();
+    if (!document || !OpenClipboard(window_)) {
         return;
     }
     EmptyClipboard();
-    const auto values = document_->beatsInRange(selectionStartTick(),
+    const auto values = document->beatsInRange(selectionStartTick(),
                                                  selectionEndTick() - selectionStartTick() + 1);
     std::wstring text;
     for (std::size_t index = 0; index < values.size(); ++index) {
@@ -842,14 +949,15 @@ void ScoreEditor::copySelectionToClipboard() const {
 }
 
 void ScoreEditor::cutSelectionToClipboard() {
-    if (!document_) {
+    auto* document = activeDocument();
+    if (!document) {
         return;
     }
     copySelectionToClipboard();
     const std::size_t start = selectionStartTick();
     const std::size_t count = selectionEndTick() - start + 1;
     notifyBeforeChange();
-    document_->eraseBeats(start, count);
+    document->eraseBeats(start, count);
     setCaretTick(start, false);
     notifyChanged();
 }
@@ -919,7 +1027,7 @@ std::vector<std::string> ScoreEditor::clipboardBeats() const {
 }
 
 void ScoreEditor::pasteClipboard() {
-    if (!document_) {
+    if (!activeDocument()) {
         return;
     }
     const auto values = clipboardBeats();
@@ -934,6 +1042,7 @@ bool ScoreEditor::selectAt(POINT point) {
     GetClientRect(window_, &client);
     for (const auto& cell : calculateLayout(client.right)) {
         if (PtInRect(&cell.bounds, point)) {
+            activeHand_ = cell.hand;
             selectedMeasure_ = cell.measureIndex;
             selectedBeat_ = cell.beatIndex;
             return true;

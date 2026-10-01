@@ -1,6 +1,7 @@
 #pragma once
 
 #include "yuanqin/ui/ScoreDocument.h"
+#include "yuanqin/ui/CompositionDocument.h"
 #include "yuanqin/ui/ScoreEditor.h"
 
 #include <Windows.h>
@@ -23,23 +24,29 @@ public:
     [[nodiscard]] HWND handle() const noexcept;
 
 private:
-    enum class ToolbarAction { NewFile, OpenFile, Save, SaveAs };
-    enum class Page { SystemSettings, Workspace };
+    enum class ToolbarAction { NewFile, OpenFile, Save, SaveAs, ExportText };
+    enum class Page { SystemSettings, Workspace, Composition };
+    enum class DocumentKind { Standard, Composition };
     enum class OutputBackend { WindowsApi, VirtualHid };
 
     struct EditorSnapshot {
         ui::ScoreDocument document;
+        ui::CompositionDocument composition;
+        ui::ScoreEditor::Hand activeHand{ui::ScoreEditor::Hand::Right};
         std::size_t selectionAnchor{};
         std::size_t selectionCaret{};
     };
 
     struct DocumentTab {
+        DocumentKind kind{DocumentKind::Standard};
         ui::ScoreDocument document;
+        ui::CompositionDocument composition;
         std::optional<std::filesystem::path> path;
         std::wstring displayName;
         std::string savedText;
         std::wstring bpmText{L"80"};
         int bpmCorrection{1};
+        ui::ScoreEditor::Hand activeHand{ui::ScoreEditor::Hand::Right};
         std::size_t selectionAnchor{};
         std::size_t selectionCaret{};
         std::vector<EditorSnapshot> undoHistory;
@@ -86,6 +93,7 @@ private:
     void openDocument();
     bool saveDocument(std::size_t index);
     bool saveDocumentAs(std::size_t index);
+    bool exportCompositionAsText(std::size_t index);
     bool writeDocument(std::size_t index, const std::filesystem::path& path);
     bool confirmClose(std::size_t index);
     void closeDocument(std::size_t index);
@@ -115,6 +123,7 @@ private:
     [[nodiscard]] RECT editModeToggleBounds() const;
     [[nodiscard]] RECT sidebarSettingsBounds() const;
     [[nodiscard]] RECT sidebarWorkspaceBounds() const;
+    [[nodiscard]] RECT sidebarCompositionBounds() const;
     [[nodiscard]] RECT sidebarToggleBounds() const;
     [[nodiscard]] RECT settingsViewportBounds() const;
     [[nodiscard]] RECT settingsScrollbarBounds() const;
@@ -127,6 +136,9 @@ private:
     [[nodiscard]] std::optional<std::filesystem::path> chooseOpenPath() const;
     [[nodiscard]] std::optional<std::filesystem::path> chooseSavePath(
         const DocumentTab& document) const;
+    [[nodiscard]] std::optional<std::filesystem::path> chooseExportPath(
+        const DocumentTab& document) const;
+    [[nodiscard]] std::string serializedDocument(const DocumentTab& document) const;
 
     HWND window_{nullptr};
     HINSTANCE instance_{nullptr};

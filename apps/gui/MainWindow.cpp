@@ -397,6 +397,7 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
             const POINT windowPoint{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
             const RECT settingsButton = sidebarSettingsBounds();
             const RECT workspaceButton = sidebarWorkspaceBounds();
+            const RECT compositionButton = sidebarCompositionBounds();
             const RECT sidebarToggle = sidebarToggleBounds();
             if (PtInRect(&settingsButton, windowPoint)) {
                 setActivePage(Page::SystemSettings);
@@ -404,6 +405,10 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
             }
             if (PtInRect(&workspaceButton, windowPoint)) {
                 setActivePage(Page::Workspace);
+                return 0;
+            }
+            if (PtInRect(&compositionButton, windowPoint)) {
+                setActivePage(Page::Composition);
                 return 0;
             }
             if (PtInRect(&sidebarToggle, windowPoint)) {
@@ -673,7 +678,10 @@ RECT MainWindow::editModeToggleBounds() const {
     if (items.empty()) {
         return {0, 0, 0, 0};
     }
-    const RECT saveAs = items.back().bounds;
+    const auto saveAsItem = std::find_if(items.begin(), items.end(), [](const ToolbarItem& item) {
+        return item.action == ToolbarAction::SaveAs;
+    });
+    const RECT saveAs = saveAsItem == items.end() ? items.back().bounds : saveAsItem->bounds;
     return {saveAs.left, saveAs.bottom + 5, saveAs.right, saveAs.bottom + 31};
 }
 
@@ -689,11 +697,15 @@ RECT MainWindow::sidebarWorkspaceBounds() const {
     return {9, 76, sidebarWidth() - 9, 126};
 }
 
+RECT MainWindow::sidebarCompositionBounds() const {
+    return {9, 136, sidebarWidth() - 9, 186};
+}
+
 RECT MainWindow::sidebarToggleBounds() const {
     RECT client{};
     GetClientRect(window_, &client);
-    return {9, std::max(136L, client.bottom - 58), sidebarWidth() - 9,
-            std::max(178L, client.bottom - 14)};
+    return {9, std::max(196L, client.bottom - 58), sidebarWidth() - 9,
+            std::max(238L, client.bottom - 14)};
 }
 
 RECT MainWindow::settingsViewportBounds() const {
@@ -755,8 +767,10 @@ void MainWindow::setSettingsScrollFromY(int y) {
 bool MainWindow::shouldHandleWithoutActivation(POINT clientPoint) const {
     const RECT settingsButton = sidebarSettingsBounds();
     const RECT workspaceButton = sidebarWorkspaceBounds();
+    const RECT compositionButton = sidebarCompositionBounds();
     const RECT toggleButton = sidebarToggleBounds();
     if (PtInRect(&settingsButton, clientPoint) || PtInRect(&workspaceButton, clientPoint) ||
+        PtInRect(&compositionButton, clientPoint) ||
         PtInRect(&toggleButton, clientPoint)) {
         return true;
     }
@@ -805,10 +819,13 @@ std::vector<MainWindow::ToolbarItem> MainWindow::toolbarItems() const {
     GetClientRect(window_, &client);
     client.right = std::max<LONG>(0, client.right - sidebarWidth());
     struct Definition { ToolbarAction action; const wchar_t* label; int width; };
-    constexpr Definition definitions[]{{ToolbarAction::NewFile, L"＋ 新建", 84},
+    std::vector<Definition> definitions{{ToolbarAction::NewFile, L"＋ 新建", 84},
                                         {ToolbarAction::OpenFile, L"打开", 78},
                                         {ToolbarAction::Save, L"保存", 78},
                                         {ToolbarAction::SaveAs, L"另存为", 92}};
+    if (activePage_ == Page::Composition) {
+        definitions.push_back({ToolbarAction::ExportText, L"导出 .txt", 94});
+    }
     constexpr int gap = 10;
     int total = -gap;
     for (const auto& definition : definitions) {
@@ -832,9 +849,19 @@ std::vector<MainWindow::TabItem> MainWindow::tabItems() const {
     GetClientRect(window_, &client);
     client.right = std::max<LONG>(0, client.right - sidebarWidth());
     const int available = std::max(200, static_cast<int>(client.right) - 64);
-    const int width = std::clamp(available / static_cast<int>(documents_.size()), 118, 218);
+    const DocumentKind kind = activePage_ == Page::Composition ? DocumentKind::Composition
+                                                                 : DocumentKind::Standard;
+    const auto count = static_cast<int>(std::count_if(documents_.begin(), documents_.end(),
+        [kind](const DocumentTab& tab) { return tab.kind == kind; }));
+    if (count == 0) {
+        return result;
+    }
+    const int width = std::clamp(available / count, 118, 218);
     int x = 30;
     for (std::size_t index = 0; index < documents_.size(); ++index) {
+        if (documents_[index].kind != kind) {
+            continue;
+        }
         RECT bounds{x, 108, std::min(static_cast<int>(client.right) - 26, x + width), 151};
         RECT close{bounds.right - 31, bounds.top + 8, bounds.right - 7, bounds.bottom - 8};
         result.push_back({bounds, close, index});
@@ -1086,6 +1113,7 @@ void MainWindow::paintSidebar(HDC context, const RECT& client) {
 
     const RECT settings = sidebarSettingsBounds();
     const RECT workspace = sidebarWorkspaceBounds();
+    const RECT composition = sidebarCompositionBounds();
     const RECT toggle = sidebarToggleBounds();
     if (activePage_ == Page::SystemSettings) {
         fillRoundedRect(context, settings, 15, RGB(61, 139, 160));
@@ -1093,12 +1121,17 @@ void MainWindow::paintSidebar(HDC context, const RECT& client) {
     if (activePage_ == Page::Workspace) {
         fillRoundedRect(context, workspace, 15, RGB(61, 139, 160));
     }
+    if (activePage_ == Page::Composition) {
+        fillRoundedRect(context, composition, 15, RGB(61, 139, 160));
+    }
 
     RECT settingsIcon = settings;
     RECT workspaceIcon = workspace;
+    RECT compositionIcon = composition;
     if (sidebarExpanded_) {
         settingsIcon.right = settingsIcon.left + 50;
         workspaceIcon.right = workspaceIcon.left + 50;
+        compositionIcon.right = compositionIcon.left + 50;
     }
     drawGearIcon(context, settingsIcon,
                  activePage_ == Page::SystemSettings ? RGB(238, 235, 251)
@@ -1106,6 +1139,19 @@ void MainWindow::paintSidebar(HDC context, const RECT& client) {
     drawWorkspaceIcon(context, workspaceIcon,
                       activePage_ == Page::Workspace ? RGB(238, 235, 251)
                                                      : RGB(171, 220, 226));
+    const COLORREF compositionColor = activePage_ == Page::Composition
+        ? RGB(238, 235, 251) : RGB(171, 220, 226);
+    const HPEN compositionPen = CreatePen(PS_SOLID, 2, compositionColor);
+    const auto oldPen = SelectObject(context, compositionPen);
+    const int iconLeft = compositionIcon.left + (compositionIcon.right - compositionIcon.left - 22) / 2;
+    MoveToEx(context, iconLeft, compositionIcon.top + 17, nullptr);
+    LineTo(context, iconLeft + 22, compositionIcon.top + 17);
+    MoveToEx(context, iconLeft, compositionIcon.top + 31, nullptr);
+    LineTo(context, iconLeft + 22, compositionIcon.top + 31);
+    MoveToEx(context, iconLeft + 4, compositionIcon.top + 10, nullptr);
+    LineTo(context, iconLeft + 4, compositionIcon.top + 38);
+    SelectObject(context, oldPen);
+    DeleteObject(compositionPen);
 
     fillRoundedRect(context, toggle, 12, RGB(25, 82, 101));
     drawSidebarChevron(context, toggle, sidebarExpanded_, RGB(177, 224, 230));
@@ -1115,8 +1161,10 @@ void MainWindow::paintSidebar(HDC context, const RECT& client) {
         SetTextColor(context, RGB(232, 250, 251));
         RECT settingsText{settings.left + 52, settings.top, settings.right - 8, settings.bottom};
         RECT workspaceText{workspace.left + 52, workspace.top, workspace.right - 8, workspace.bottom};
+        RECT compositionText{composition.left + 52, composition.top, composition.right - 8, composition.bottom};
         DrawTextW(context, L"设置", -1, &settingsText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
         DrawTextW(context, L"编辑", -1, &workspaceText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DrawTextW(context, L"创作", -1, &compositionText, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     }
 }
 
@@ -1208,6 +1256,17 @@ void MainWindow::setActivePage(Page page) {
         stopPlayback();
     }
     activePage_ = page;
+    if (page != Page::SystemSettings) {
+        const DocumentKind wanted = page == Page::Composition ? DocumentKind::Composition
+                                                              : DocumentKind::Standard;
+        const auto found = std::find_if(documents_.begin(), documents_.end(),
+            [wanted](const DocumentTab& tab) { return tab.kind == wanted; });
+        if (found == documents_.end()) {
+            newDocument();
+        } else {
+            setActiveDocument(static_cast<std::size_t>(std::distance(documents_.begin(), found)));
+        }
+    }
     updatePageVisibility();
     layoutChildren();
     InvalidateRect(window_, nullptr, FALSE);
@@ -1223,7 +1282,7 @@ void MainWindow::updatePageVisibility() {
     if (!editor_.handle() || !bpmEdit_ || !bpmCorrectionCombo_ || !outputBackendCombo_) {
         return;
     }
-    const bool workspaceVisible = activePage_ == Page::Workspace;
+    const bool workspaceVisible = activePage_ == Page::Workspace || activePage_ == Page::Composition;
     ShowWindow(editor_.handle(), workspaceVisible ? SW_SHOW : SW_HIDE);
     ShowWindow(bpmEdit_, workspaceVisible ? SW_SHOW : SW_HIDE);
     ShowWindow(bpmCorrectionCombo_, workspaceVisible ? SW_SHOW : SW_HIDE);
@@ -1284,7 +1343,8 @@ void MainWindow::recordActiveDocumentHistory() {
         return;
     }
     auto& tab = documents_[activeDocument_];
-    tab.undoHistory.push_back({tab.document, editor_.selectionAnchorTick(), editor_.selectionCaretTick()});
+    tab.undoHistory.push_back({tab.document, tab.composition, editor_.activeHand(),
+                              editor_.selectionAnchorTick(), editor_.selectionCaretTick()});
     if (tab.undoHistory.size() > 200) {
         tab.undoHistory.erase(tab.undoHistory.begin());
     }
@@ -1300,14 +1360,22 @@ void MainWindow::undoActiveDocument() {
         setStatus(L"没有可撤销的编辑操作");
         return;
     }
-    tab.redoHistory.push_back({tab.document, editor_.selectionAnchorTick(), editor_.selectionCaretTick()});
+    tab.redoHistory.push_back({tab.document, tab.composition, editor_.activeHand(),
+                              editor_.selectionAnchorTick(), editor_.selectionCaretTick()});
     EditorSnapshot snapshot = std::move(tab.undoHistory.back());
     tab.undoHistory.pop_back();
     tab.document = std::move(snapshot.document);
+    tab.composition = std::move(snapshot.composition);
+    tab.activeHand = snapshot.activeHand;
     tab.selectionAnchor = snapshot.selectionAnchor;
     tab.selectionCaret = snapshot.selectionCaret;
-    tab.modified = tab.document.toText() != tab.savedText;
-    editor_.setDocument(&tab.document);
+    tab.modified = serializedDocument(tab) != tab.savedText;
+    if (tab.kind == DocumentKind::Composition) {
+        editor_.setCompositionDocuments(&tab.composition.right(), &tab.composition.left());
+        editor_.setActiveHand(snapshot.activeHand);
+    } else {
+        editor_.setDocument(&tab.document);
+    }
     editor_.setSelectionRange(tab.selectionAnchor, tab.selectionCaret);
     transportTick_ = tab.selectionCaret;
     transportTotalTicks_ = activeScoreTickCount();
@@ -1324,14 +1392,22 @@ void MainWindow::redoActiveDocument() {
         setStatus(L"没有可恢复的编辑操作");
         return;
     }
-    tab.undoHistory.push_back({tab.document, editor_.selectionAnchorTick(), editor_.selectionCaretTick()});
+    tab.undoHistory.push_back({tab.document, tab.composition, editor_.activeHand(),
+                              editor_.selectionAnchorTick(), editor_.selectionCaretTick()});
     EditorSnapshot snapshot = std::move(tab.redoHistory.back());
     tab.redoHistory.pop_back();
     tab.document = std::move(snapshot.document);
+    tab.composition = std::move(snapshot.composition);
+    tab.activeHand = snapshot.activeHand;
     tab.selectionAnchor = snapshot.selectionAnchor;
     tab.selectionCaret = snapshot.selectionCaret;
-    tab.modified = tab.document.toText() != tab.savedText;
-    editor_.setDocument(&tab.document);
+    tab.modified = serializedDocument(tab) != tab.savedText;
+    if (tab.kind == DocumentKind::Composition) {
+        editor_.setCompositionDocuments(&tab.composition.right(), &tab.composition.left());
+        editor_.setActiveHand(snapshot.activeHand);
+    } else {
+        editor_.setDocument(&tab.document);
+    }
     editor_.setSelectionRange(tab.selectionAnchor, tab.selectionCaret);
     transportTick_ = tab.selectionCaret;
     transportTotalTicks_ = activeScoreTickCount();
@@ -1348,11 +1424,15 @@ void MainWindow::toggleInsertMode() {
 
 void MainWindow::newDocument() {
     DocumentTab tab;
-    tab.displayName = L"未命名 " + std::to_wstring(untitledCounter_++);
-    tab.savedText = tab.document.toText();
+    tab.kind = activePage_ == Page::Composition ? DocumentKind::Composition : DocumentKind::Standard;
+    tab.displayName = (tab.kind == DocumentKind::Composition ? L"未命名创作 " : L"未命名 ") +
+                      std::to_wstring(untitledCounter_++);
+    tab.savedText = serializedDocument(tab);
     documents_.push_back(std::move(tab));
     setActiveDocument(documents_.size() - 1);
-    setStatus(L"已新建空白乐谱；选择任意拍位即可输入");
+    setStatus(tab.kind == DocumentKind::Composition
+                  ? L"已新建双手乐谱；R 为右手、L 为左手，选择任意拍位即可输入"
+                  : L"已新建空白乐谱；选择任意拍位即可输入");
 }
 
 void MainWindow::openDocument() {
@@ -1377,10 +1457,15 @@ void MainWindow::openDocument() {
     }
     const std::string text((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
     DocumentTab tab;
-    tab.document = ui::ScoreDocument::fromText(text);
+    tab.kind = activePage_ == Page::Composition ? DocumentKind::Composition : DocumentKind::Standard;
+    if (tab.kind == DocumentKind::Composition) {
+        tab.composition = ui::CompositionDocument::fromText(text);
+    } else {
+        tab.document = ui::ScoreDocument::fromText(text);
+    }
     tab.path = normalized;
     tab.displayName = fileNameFor(normalized);
-    tab.savedText = tab.document.toText();
+    tab.savedText = serializedDocument(tab);
     documents_.push_back(std::move(tab));
     setActiveDocument(documents_.size() - 1);
     setStatus(L"乐谱已载入内存；编辑不会改动源文件，直到执行保存");
@@ -1404,6 +1489,30 @@ bool MainWindow::saveDocumentAs(std::size_t index) {
     return path && writeDocument(index, *path);
 }
 
+bool MainWindow::exportCompositionAsText(std::size_t index) {
+    if (index >= documents_.size() || documents_[index].kind != DocumentKind::Composition) {
+        return false;
+    }
+    const auto path = chooseExportPath(documents_[index]);
+    if (!path) {
+        return false;
+    }
+    std::ofstream output(*path, std::ios::binary | std::ios::trunc);
+    if (!output) {
+        MessageBoxW(window_, L"无法写入目标文件，请检查目录权限。", L"导出失败",
+                    MB_OK | MB_ICONERROR);
+        return false;
+    }
+    const std::string content = documents_[index].composition.mergedScore().toText();
+    output.write(content.data(), static_cast<std::streamsize>(content.size()));
+    if (!output) {
+        MessageBoxW(window_, L"导出琴谱时发生错误。", L"导出失败", MB_OK | MB_ICONERROR);
+        return false;
+    }
+    setStatus(L"已导出合并后的 .txt 乐谱到 " + path->wstring());
+    return true;
+}
+
 bool MainWindow::writeDocument(std::size_t index, const std::filesystem::path& path) {
     std::ofstream output(path, std::ios::binary | std::ios::trunc);
     if (!output) {
@@ -1411,7 +1520,7 @@ bool MainWindow::writeDocument(std::size_t index, const std::filesystem::path& p
                     MB_OK | MB_ICONERROR);
         return false;
     }
-    const std::string content = documents_[index].document.toText();
+    const std::string content = serializedDocument(documents_[index]);
     output.write(content.data(), static_cast<std::streamsize>(content.size()));
     output.close();
     if (!output) {
@@ -1470,7 +1579,13 @@ void MainWindow::setActiveDocument(std::size_t index) {
         stopPlayback();
     }
     activeDocument_ = index;
-    editor_.setDocument(&documents_[activeDocument_].document);
+    auto& tab = documents_[activeDocument_];
+    if (tab.kind == DocumentKind::Composition) {
+        editor_.setCompositionDocuments(&tab.composition.right(), &tab.composition.left());
+        editor_.setActiveHand(tab.activeHand);
+    } else {
+        editor_.setDocument(&tab.document);
+    }
     editor_.setSelectionRange(documents_[activeDocument_].selectionAnchor,
                               documents_[activeDocument_].selectionCaret);
     editor_.setInsertMode(insertMode_);
@@ -1485,7 +1600,7 @@ void MainWindow::markActiveDocumentChanged() {
     if (activeDocument_ >= documents_.size()) {
         return;
     }
-    documents_[activeDocument_].modified = documents_[activeDocument_].document.toText() !=
+    documents_[activeDocument_].modified = serializedDocument(documents_[activeDocument_]) !=
         documents_[activeDocument_].savedText;
     transportTotalTicks_ = std::max<std::size_t>(1, activeScoreTickCount());
     updateWindowTitle();
@@ -1494,6 +1609,7 @@ void MainWindow::markActiveDocumentChanged() {
 
 void MainWindow::onEditorSelectionChanged(std::size_t tickIndex) {
     if (activeDocument_ < documents_.size()) {
+        documents_[activeDocument_].activeHand = editor_.activeHand();
         documents_[activeDocument_].selectionAnchor = editor_.selectionAnchorTick();
         documents_[activeDocument_].selectionCaret = editor_.selectionCaretTick();
     }
@@ -1523,8 +1639,10 @@ std::size_t MainWindow::activeScoreTickCount() const {
     if (activeDocument_ >= documents_.size()) {
         return 1;
     }
-    const std::size_t scoreTicks = documents_[activeDocument_].document.measureCount() *
-                                   ui::kBeatsPerMeasure;
+    const auto& tab = documents_[activeDocument_];
+    const std::size_t scoreTicks = (tab.kind == DocumentKind::Composition
+        ? std::max(tab.composition.right().measureCount(), tab.composition.left().measureCount())
+        : tab.document.measureCount()) * ui::kBeatsPerMeasure;
     return scoreTicks > 0 ? scoreTicks : editor_.displayedTickCount();
 }
 
@@ -1574,8 +1692,11 @@ void MainWindow::startPlayback(std::size_t tickIndex) {
         return;
     }
 
-    auto parseResult = core::ScoreParser::parseText(
-        documents_[activeDocument_].document.toText());
+    const auto& tab = documents_[activeDocument_];
+    const std::string playbackText = tab.kind == DocumentKind::Composition
+        ? tab.composition.mergedScore().toText()
+        : tab.document.toText();
+    auto parseResult = core::ScoreParser::parseText(playbackText);
     if (!parseResult.success || !parseResult.score.hasNotes()) {
         setStatus(L"当前乐谱没有可播放的音符");
         return;
@@ -1767,6 +1888,9 @@ void MainWindow::invoke(ToolbarAction action) {
         case ToolbarAction::SaveAs:
             if (!documents_.empty()) saveDocumentAs(activeDocument_);
             break;
+        case ToolbarAction::ExportText:
+            if (!documents_.empty()) exportCompositionAsText(activeDocument_);
+            break;
     }
 }
 
@@ -1793,7 +1917,9 @@ std::optional<std::filesystem::path> MainWindow::chooseOpenPath() const {
     OPENFILENAMEW dialog{};
     dialog.lStructSize = sizeof(dialog);
     dialog.hwndOwner = window_;
-    dialog.lpstrFilter = L"琴谱文本 (*.txt)\0*.txt\0所有文件 (*.*)\0*.*\0\0";
+    const bool composition = activePage_ == Page::Composition;
+    dialog.lpstrFilter = composition ? L"双手琴谱 (*.dtxt)\0*.dtxt\0\0"
+                                      : L"琴谱文本 (*.txt)\0*.txt\0\0";
     dialog.lpstrFile = fileName.data();
     dialog.nMaxFile = static_cast<DWORD>(fileName.size());
     dialog.lpstrInitialDir = initialDirectory.c_str();
@@ -1806,13 +1932,36 @@ std::optional<std::filesystem::path> MainWindow::chooseSavePath(
     const DocumentTab& document) const {
     std::array<wchar_t, 32768> fileName{};
     const std::wstring initialDirectory = scoreDirectory().wstring();
+    const bool composition = document.kind == DocumentKind::Composition;
     const std::wstring suggested = document.path ? document.path->wstring()
-                                                  : document.displayName + L".txt";
+                                                  : document.displayName + (composition ? L".dtxt" : L".txt");
     std::copy_n(suggested.c_str(), std::min(suggested.size(), fileName.size() - 1), fileName.data());
     OPENFILENAMEW dialog{};
     dialog.lStructSize = sizeof(dialog);
     dialog.hwndOwner = window_;
-    dialog.lpstrFilter = L"琴谱文本 (*.txt)\0*.txt\0所有文件 (*.*)\0*.*\0\0";
+    dialog.lpstrFilter = composition ? L"双手琴谱 (*.dtxt)\0*.dtxt\0\0"
+                                      : L"琴谱文本 (*.txt)\0*.txt\0\0";
+    dialog.lpstrFile = fileName.data();
+    dialog.nMaxFile = static_cast<DWORD>(fileName.size());
+    dialog.lpstrDefExt = composition ? L"dtxt" : L"txt";
+    dialog.lpstrInitialDir = initialDirectory.c_str();
+    dialog.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_EXPLORER;
+    return GetSaveFileNameW(&dialog) ? std::optional<std::filesystem::path>(fileName.data())
+                                     : std::nullopt;
+}
+
+std::optional<std::filesystem::path> MainWindow::chooseExportPath(
+    const DocumentTab& document) const {
+    std::array<wchar_t, 32768> fileName{};
+    const std::wstring initialDirectory = scoreDirectory().wstring();
+    const std::wstring suggested = document.path
+        ? document.path->stem().wstring() + L".txt"
+        : document.displayName + L".txt";
+    std::copy_n(suggested.c_str(), std::min(suggested.size(), fileName.size() - 1), fileName.data());
+    OPENFILENAMEW dialog{};
+    dialog.lStructSize = sizeof(dialog);
+    dialog.hwndOwner = window_;
+    dialog.lpstrFilter = L"琴谱文本 (*.txt)\0*.txt\0\0";
     dialog.lpstrFile = fileName.data();
     dialog.nMaxFile = static_cast<DWORD>(fileName.size());
     dialog.lpstrDefExt = L"txt";
@@ -1820,6 +1969,11 @@ std::optional<std::filesystem::path> MainWindow::chooseSavePath(
     dialog.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_EXPLORER;
     return GetSaveFileNameW(&dialog) ? std::optional<std::filesystem::path>(fileName.data())
                                      : std::nullopt;
+}
+
+std::string MainWindow::serializedDocument(const DocumentTab& document) const {
+    return document.kind == DocumentKind::Composition ? document.composition.toText()
+                                                       : document.document.toText();
 }
 
 }  // namespace yuanqin::app

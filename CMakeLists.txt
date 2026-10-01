@@ -24,6 +24,7 @@ target_link_libraries(yuanqin_playback PUBLIC yuanqin_core user32 setupapi)
 target_compile_features(yuanqin_playback PUBLIC cxx_std_20)
 
 add_library(yuanqin_ui_model STATIC
+    src/ui/CompositionDocument.cpp
     src/ui/ScoreDocument.cpp
 )
 target_include_directories(yuanqin_ui_model PUBLIC include)
@@ -72,6 +73,10 @@ if(YUANQIN_BUILD_TESTS)
     add_executable(yuanqin_score_document_tests tests/ScoreDocumentTests.cpp)
     target_link_libraries(yuanqin_score_document_tests PRIVATE yuanqin_ui_model)
     add_test(NAME yuanqin_score_document_tests COMMAND yuanqin_score_document_tests)
+
+    add_executable(yuanqin_composition_document_tests tests/CompositionDocumentTests.cpp)
+    target_link_libraries(yuanqin_composition_document_tests PRIVATE yuanqin_ui_model)
+    add_test(NAME yuanqin_composition_document_tests COMMAND yuanqin_composition_document_tests)
 
     add_executable(yuanqin_music_player_tests tests/MusicPlayerTests.cpp)
     target_link_libraries(yuanqin_music_player_tests PRIVATE yuanqin_playback)
