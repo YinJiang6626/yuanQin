@@ -38,6 +38,7 @@ constexpr int kSettingsContentHeight = 590;
 constexpr std::array<int, 5> kBpmCorrections{1, 2, 4, 8, 32};
 constexpr UINT kPlaybackProgressMessage = WM_APP + 11;
 constexpr UINT kPlaybackCompleteMessage = WM_APP + 12;
+constexpr UINT_PTR kTabAnimationTimer = 1;
 
 constexpr COLORREF kDeepTeal = RGB(17, 73, 94);
 constexpr COLORREF kOcean = RGB(31, 139, 174);
@@ -367,6 +368,13 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
         case WM_ERASEBKGND:
             return 1;
 
+        case WM_TIMER:
+            if (wParam == kTabAnimationTimer) {
+                tickTabAnimation();
+                return 0;
+            }
+            break;
+
         case WM_MOUSEACTIVATE: {
             const HWND gameWindow = playback::GenshinWindowTarget::find();
             const bool preserveGameFocus = playbackRunning_ ||
@@ -477,6 +485,14 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
                 }
                 if (PtInRect(&item.bounds, point)) {
                     setActiveDocument(item.index);
+                    draggingTab_ = true;
+                    draggedTabIndex_ = item.index;
+                    tabDragTargetIndex_ = item.index;
+                    tabDragGrabOffsetX_ = point.x - item.bounds.left;
+                    tabDragTargetOffset_ = 0.0F;
+                    tabVisualOffsets_.assign(documents_.size(), 0.0F);
+                    startTabAnimation();
+                    SetCapture(window_);
                     return 0;
                 }
             }
@@ -519,6 +535,11 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
                 InvalidateRect(window_, nullptr, FALSE);
                 return 0;
             }
+            if (draggingTab_) {
+                POINT point{GET_X_LPARAM(lParam) - sidebarWidth(), GET_Y_LPARAM(lParam)};
+                updateTabDragTarget(point);
+                return 0;
+            }
             break;
 
         case WM_LBUTTONUP:
@@ -546,12 +567,19 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
                 seekTo(draggedTick_, dragWasPlaying_);
                 return 0;
             }
+            if (draggingTab_) {
+                draggingTab_ = false;
+                ReleaseCapture();
+                reorderDocument(draggedTabIndex_, tabDragTargetIndex_);
+                return 0;
+            }
             break;
 
         case WM_CAPTURECHANGED:
             draggingWindow_ = false;
             draggingOpacity_ = false;
             draggingSettingsScroll_ = false;
+            draggingTab_ = false;
             if (draggingProgress_) {
                 draggingProgress_ = false;
                 seekTo(draggedTick_, dragWasPlaying_);
@@ -674,15 +702,12 @@ RECT MainWindow::headerDragBounds() const {
 }
 
 RECT MainWindow::editModeToggleBounds() const {
-    const auto items = toolbarItems();
-    if (items.empty()) {
-        return {0, 0, 0, 0};
-    }
-    const auto saveAsItem = std::find_if(items.begin(), items.end(), [](const ToolbarItem& item) {
-        return item.action == ToolbarAction::SaveAs;
-    });
-    const RECT saveAs = saveAsItem == items.end() ? items.back().bounds : saveAsItem->bounds;
-    return {saveAs.left, saveAs.bottom + 5, saveAs.right, saveAs.bottom + 31};
+    RECT client{};
+    GetClientRect(window_, &client);
+    client.right = std::max<LONG>(0, client.right - sidebarWidth());
+    // The input-mode control keeps a stable editor-header location. It is not
+    // tied to the Save As button because the composition page has extra tools.
+    return {std::max(0L, client.right - 124), 73, std::max(0L, client.right - 32), 99};
 }
 
 int MainWindow::sidebarWidth() const noexcept {
@@ -794,6 +819,11 @@ bool MainWindow::shouldHandleWithoutActivation(POINT clientPoint) const {
         PtInRect(&editModeToggle, workspacePoint)) {
         return true;
     }
+    for (const auto& item : tabItems()) {
+        if (PtInRect(&item.bounds, workspacePoint)) {
+            return true;
+        }
+    }
 
     if (!editor_.handle()) {
         return false;
@@ -873,6 +903,85 @@ std::vector<MainWindow::TabItem> MainWindow::tabItems() const {
     return result;
 }
 
+int MainWindow::tabVisualOffset(std::size_t documentIndex) const {
+    if (documentIndex >= tabVisualOffsets_.size()) {
+        return 0;
+    }
+    return static_cast<int>(std::lround(tabVisualOffsets_[documentIndex]));
+}
+
+void MainWindow::updateTabDragTarget(POINT point) {
+    const auto items = tabItems();
+    for (const auto& item : items) {
+        if (PtInRect(&item.bounds, point)) {
+            tabDragTargetIndex_ = item.index;
+            break;
+        }
+    }
+    const auto dragged = std::find_if(items.begin(), items.end(), [this](const TabItem& item) {
+        return item.index == draggedTabIndex_;
+    });
+    if (dragged != items.end()) {
+        tabDragTargetOffset_ = static_cast<float>(point.x - tabDragGrabOffsetX_ -
+                                                  dragged->bounds.left);
+    }
+    startTabAnimation();
+}
+
+void MainWindow::startTabAnimation() {
+    tabAnimating_ = true;
+    if (window_) {
+        SetTimer(window_, kTabAnimationTimer, 16, nullptr);
+    }
+}
+
+void MainWindow::tickTabAnimation() {
+    if (tabVisualOffsets_.size() != documents_.size()) {
+        tabVisualOffsets_.assign(documents_.size(), 0.0F);
+    }
+    const auto items = tabItems();
+    const auto dragged = std::find_if(items.begin(), items.end(), [this](const TabItem& item) {
+        return item.index == draggedTabIndex_;
+    });
+    const auto target = std::find_if(items.begin(), items.end(), [this](const TabItem& item) {
+        return item.index == tabDragTargetIndex_;
+    });
+    const std::size_t draggedPosition = dragged == items.end()
+        ? items.size() : static_cast<std::size_t>(std::distance(items.begin(), dragged));
+    const std::size_t targetPosition = target == items.end()
+        ? draggedPosition : static_cast<std::size_t>(std::distance(items.begin(), target));
+    const float tabStep = dragged == items.end() ? 0.0F
+        : static_cast<float>((dragged->bounds.right - dragged->bounds.left) + 5);
+
+    bool moving = false;
+    for (std::size_t position = 0; position < items.size(); ++position) {
+        const auto& item = items[position];
+        float desired = 0.0F;
+        if (draggingTab_ && item.index == draggedTabIndex_) {
+            desired = tabDragTargetOffset_;
+        } else if (draggingTab_ && draggedPosition < targetPosition &&
+                   position > draggedPosition && position <= targetPosition) {
+            desired = -tabStep;
+        } else if (draggingTab_ && targetPosition < draggedPosition &&
+                   position >= targetPosition && position < draggedPosition) {
+            desired = tabStep;
+        }
+        float& current = tabVisualOffsets_[item.index];
+        const float delta = desired - current;
+        if (std::abs(delta) > 0.25F) {
+            current += delta * 0.32F;
+            moving = true;
+        } else {
+            current = desired;
+        }
+    }
+    if (!draggingTab_ && !moving) {
+        tabAnimating_ = false;
+        KillTimer(window_, kTabAnimationTimer);
+    }
+    InvalidateRect(window_, nullptr, FALSE);
+}
+
 void MainWindow::paint() {
     PAINTSTRUCT paintStruct{};
     const HDC windowContext = BeginPaint(window_, &paintStruct);
@@ -945,6 +1054,12 @@ void MainWindow::paint() {
     }
 
     RECT editModeToggle = editModeToggleBounds();
+    RECT editModeLabel{std::max(0L, editModeToggle.left - 78), editModeToggle.top,
+                       editModeToggle.left - 4, editModeToggle.bottom};
+    SelectObject(context, interfaceFont_);
+    SetTextColor(context, RGB(214, 242, 245));
+    DrawTextW(context, L"输入模式：", -1, &editModeLabel,
+              DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
     fillRoundedRect(context, editModeToggle, 9,
                     insertMode_ ? RGB(231, 224, 249) : RGB(220, 244, 245));
     SelectObject(context, smallFont_);
@@ -954,15 +1069,30 @@ void MainWindow::paint() {
 
     for (const auto& item : tabItems()) {
         const bool active = item.index == activeDocument_;
-        fillRoundedRect(context, item.bounds, 12, active ? RGB(249, 253, 255) : RGB(95, 175, 194));
+        TabItem tab = item;
+        const int visualOffset = tabVisualOffset(item.index);
+        OffsetRect(&tab.bounds, visualOffset, 0);
+        OffsetRect(&tab.closeBounds, visualOffset, 0);
+        fillRoundedRect(context, tab.bounds, 12, active ? RGB(249, 253, 255) : RGB(95, 175, 194));
         if (active) {
-            RECT accent{item.bounds.left + 12, item.bounds.bottom - 4, item.bounds.right - 12,
-                        item.bounds.bottom - 1};
+            RECT accent{tab.bounds.left + 12, tab.bounds.bottom - 4, tab.bounds.right - 12,
+                        tab.bounds.bottom - 1};
             fillRoundedRect(context, accent, 3, kLavender);
+        }
+        if (draggingTab_ && item.index == tabDragTargetIndex_ &&
+            item.index != draggedTabIndex_) {
+            const HPEN dropPen = CreatePen(PS_SOLID, 2, RGB(227, 218, 255));
+            const auto oldDropPen = SelectObject(context, dropPen);
+            const auto oldDropBrush = SelectObject(context, GetStockObject(NULL_BRUSH));
+            RoundRect(context, tab.bounds.left + 1, tab.bounds.top + 1,
+                      tab.bounds.right - 1, tab.bounds.bottom - 1, 11, 11);
+            SelectObject(context, oldDropBrush);
+            SelectObject(context, oldDropPen);
+            DeleteObject(dropPen);
         }
         SelectObject(context, interfaceFont_);
         SetTextColor(context, active ? kDeepTeal : RGB(232, 250, 251));
-        RECT label{item.bounds.left + 14, item.bounds.top, item.closeBounds.left - 4, item.bounds.bottom};
+        RECT label{tab.bounds.left + 14, tab.bounds.top, tab.closeBounds.left - 4, tab.bounds.bottom};
         std::wstring title = documents_[item.index].displayName;
         if (documents_[item.index].modified) {
             title += L"  •";
@@ -970,7 +1100,7 @@ void MainWindow::paint() {
         DrawTextW(context, title.c_str(), -1, &label,
                   DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
         SetTextColor(context, active ? RGB(110, 104, 158) : RGB(222, 246, 248));
-        RECT close = item.closeBounds;
+        RECT close = tab.closeBounds;
         DrawTextW(context, L"×", -1, &close, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
     }
 
@@ -1569,6 +1699,53 @@ void MainWindow::closeDocument(std::size_t index) {
     }
     activeDocument_ = std::min(activeDocument_, documents_.size() - 1);
     setActiveDocument(activeDocument_);
+}
+
+void MainWindow::reorderDocument(std::size_t from, std::size_t target) {
+    if (from >= documents_.size() || target >= documents_.size() || from == target ||
+        documents_[from].kind != documents_[target].kind) {
+        return;
+    }
+
+    if (tabVisualOffsets_.size() != documents_.size()) {
+        tabVisualOffsets_.assign(documents_.size(), 0.0F);
+    }
+    std::vector<float> visualLefts(documents_.size(), 0.0F);
+    for (const auto& item : tabItems()) {
+        visualLefts[item.index] = static_cast<float>(item.bounds.left) +
+                                  tabVisualOffsets_[item.index];
+    }
+
+    DocumentTab moved = std::move(documents_[from]);
+    const float movedOffset = tabVisualOffsets_[from];
+    const float movedLeft = visualLefts[from];
+    documents_.erase(documents_.begin() + static_cast<std::ptrdiff_t>(from));
+    tabVisualOffsets_.erase(tabVisualOffsets_.begin() + static_cast<std::ptrdiff_t>(from));
+    visualLefts.erase(visualLefts.begin() + static_cast<std::ptrdiff_t>(from));
+    const std::size_t insertion = target;
+    documents_.insert(documents_.begin() + static_cast<std::ptrdiff_t>(insertion),
+                      std::move(moved));
+    tabVisualOffsets_.insert(tabVisualOffsets_.begin() + static_cast<std::ptrdiff_t>(insertion),
+                             movedOffset);
+    visualLefts.insert(visualLefts.begin() + static_cast<std::ptrdiff_t>(insertion), movedLeft);
+
+    if (activeDocument_ == from) {
+        activeDocument_ = insertion;
+    } else {
+        if (activeDocument_ > from) {
+            --activeDocument_;
+        }
+        if (activeDocument_ >= insertion) {
+            ++activeDocument_;
+        }
+    }
+    for (const auto& item : tabItems()) {
+        tabVisualOffsets_[item.index] = visualLefts[item.index] -
+            static_cast<float>(item.bounds.left);
+    }
+    setActiveDocument(activeDocument_);
+    startTabAnimation();
+    setStatus(L"已调整乐谱标签顺序");
 }
 
 void MainWindow::setActiveDocument(std::size_t index) {

@@ -520,36 +520,42 @@ std::vector<ScoreEditor::CellLayout> ScoreEditor::calculateLayout(int clientWidt
     const int contentRight = cardRight - 12;
     const int availableWidth = std::max(240, contentRight - contentLeft);
 
-    const auto appendHand = [&](std::size_t row, int y, Hand hand, const ScoreDocument* source) {
+    for (std::size_t row = 0; row < displayedRowCount(); ++row) {
         std::array<double, kMeasuresPerRow> measureWeights{};
+        std::array<std::array<double, kBeatsPerMeasure>, kMeasuresPerRow> beatWeights{};
         double measureWeightTotal = 0.0;
         for (std::size_t column = 0; column < kMeasuresPerRow; ++column) {
             const std::size_t measureIndex = row * kMeasuresPerRow + column;
-            int units = 0;
+            int measureUnits = 0;
             for (std::size_t beatIndex = 0; beatIndex < kBeatsPerMeasure; ++beatIndex) {
-                units += textUnits(source ? source->beat(measureIndex, beatIndex) : std::string{});
+                int units = textUnits(document_ ? document_->beat(measureIndex, beatIndex)
+                                                : std::string{});
+                if (isComposition()) {
+                    units = std::max(units, textUnits(leftDocument_
+                        ? leftDocument_->beat(measureIndex, beatIndex) : std::string{}));
+                }
+                beatWeights[column][beatIndex] = static_cast<double>(units);
+                measureUnits += units;
             }
-            measureWeights[column] = static_cast<double>(std::max(4, units));
+            measureWeights[column] = static_cast<double>(std::max(4, measureUnits));
             measureWeightTotal += measureWeights[column];
         }
 
+        const auto appendHand = [&](int cellTop, int cellBottom, Hand hand) {
         const int measureBase = static_cast<int>(availableWidth * 0.17);
         const int flexibleWidth = std::max(0, availableWidth - measureBase * 4);
         int measureX = contentLeft;
         for (std::size_t column = 0; column < kMeasuresPerRow; ++column) {
+            const std::size_t measureIndex = row * kMeasuresPerRow + column;
             const int measureRight = column + 1 == kMeasuresPerRow
                 ? contentRight
                 : measureX + measureBase + static_cast<int>(std::round(
                     flexibleWidth * measureWeights[column] / measureWeightTotal));
             const int measureWidth = std::max(40, measureRight - measureX);
 
-            std::array<double, kBeatsPerMeasure> beatWeights{};
             double beatWeightTotal = 0.0;
-            const std::size_t measureIndex = row * kMeasuresPerRow + column;
             for (std::size_t beatIndex = 0; beatIndex < kBeatsPerMeasure; ++beatIndex) {
-                beatWeights[beatIndex] = textUnits(
-                    source ? source->beat(measureIndex, beatIndex) : std::string{});
-                beatWeightTotal += beatWeights[beatIndex];
+                beatWeightTotal += beatWeights[column][beatIndex];
             }
 
             const int beatBase = std::max(8, static_cast<int>(measureWidth * 0.09));
@@ -559,33 +565,25 @@ std::vector<ScoreEditor::CellLayout> ScoreEditor::calculateLayout(int clientWidt
                 const int beatRight = beatIndex + 1 == kBeatsPerMeasure
                     ? measureRight
                     : beatX + beatBase + static_cast<int>(std::round(
-                        beatFlexible * beatWeights[beatIndex] / beatWeightTotal));
-                cells.push_back({{beatX, y + 24, beatRight, y + rowHeight() - 10},
+                        beatFlexible * beatWeights[column][beatIndex] / beatWeightTotal));
+                cells.push_back({{beatX, cellTop, beatRight, cellBottom},
                                  measureIndex, beatIndex, hand});
                 beatX = beatRight;
             }
             measureX = measureRight;
         }
-    };
+        };
 
-    for (std::size_t row = 0; row < displayedRowCount(); ++row) {
         const int y = kRowTop + static_cast<int>(row) * rowStride() - scrollOffset_;
         if (isComposition()) {
-            const int handHeight = (rowHeight() - 20) / 2;
-            appendHand(row, y, Hand::Right, document_);
-            // Offset the cells that were just appended into the lower visual hand row.
-            const std::size_t firstLeft = cells.size();
-            appendHand(row, y + handHeight, Hand::Left, leftDocument_);
-            for (std::size_t index = firstLeft; index < cells.size(); ++index) {
-                // appendHand reserves its own row-height. Make the lower hand compact.
-                cells[index].bounds.bottom = y + rowHeight() - 10;
-            }
-            const std::size_t rightStart = firstLeft - kMeasuresPerRow * kBeatsPerMeasure;
-            for (std::size_t index = rightStart; index < firstLeft; ++index) {
-                cells[index].bounds.bottom = y + handHeight - 6;
-            }
+            const int contentTop = y + 24;
+            const int contentBottom = y + rowHeight() - 10;
+            constexpr int handGap = 8;
+            const int handHeight = (contentBottom - contentTop - handGap) / 2;
+            appendHand(contentTop, contentTop + handHeight, Hand::Right);
+            appendHand(contentTop + handHeight + handGap, contentBottom, Hand::Left);
         } else {
-            appendHand(row, y, Hand::Right, document_);
+            appendHand(y + 24, y + rowHeight() - 10, Hand::Right);
         }
     }
     return cells;
@@ -629,10 +627,13 @@ void ScoreEditor::paint() {
 
         SelectObject(context, smallFont_);
         SetTextColor(context, kMutedInk);
-        RECT numberRect{kPageMargin + 8, y + 27, kPageMargin + kRowNumberWidth - 4,
-                        y + rowHeightValue - 10};
         const std::wstring number = std::to_wstring(row + 1);
-        DrawTextW(context, number.c_str(), -1, &numberRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        if (!isComposition()) {
+            RECT numberRect{kPageMargin + 8, y + 27, kPageMargin + kRowNumberWidth - 4,
+                            y + rowHeightValue - 10};
+            DrawTextW(context, number.c_str(), -1, &numberRect,
+                      DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        }
 
         const auto cellsPerHandRow = kMeasuresPerRow * kBeatsPerMeasure;
         const auto firstCell = row * cellsPerHandRow * (isComposition() ? 2 : 1);
@@ -648,10 +649,18 @@ void ScoreEditor::paint() {
             DrawTextW(context, label.c_str(), -1, &labelRect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         }
         if (isComposition()) {
-            RECT rightLabel{kPageMargin + 8, y + 24, kPageMargin + kRowNumberWidth - 4,
-                            y + rowHeightValue / 2};
-            RECT leftLabel{kPageMargin + 8, y + rowHeightValue / 2, kPageMargin + kRowNumberWidth - 4,
-                           y + rowHeightValue - 8};
+            const auto leftFirst = firstCell + cellsPerHandRow;
+            if (leftFirst >= cells.size()) {
+                continue;
+            }
+            RECT numberRect{kPageMargin + 6, cells[firstCell].bounds.top,
+                            kPageMargin + 22, cells[leftFirst].bounds.bottom};
+            DrawTextW(context, number.c_str(), -1, &numberRect,
+                      DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            RECT rightLabel{kPageMargin + 24, cells[firstCell].bounds.top,
+                            kPageMargin + kRowNumberWidth - 4, cells[firstCell].bounds.bottom};
+            RECT leftLabel{kPageMargin + 24, cells[leftFirst].bounds.top,
+                           kPageMargin + kRowNumberWidth - 4, cells[leftFirst].bounds.bottom};
             SetTextColor(context, RGB(91, 83, 146));
             DrawTextW(context, L"R", -1, &rightLabel, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
             SetTextColor(context, RGB(45, 137, 145));

@@ -97,6 +97,11 @@ private:
     bool writeDocument(std::size_t index, const std::filesystem::path& path);
     bool confirmClose(std::size_t index);
     void closeDocument(std::size_t index);
+    void reorderDocument(std::size_t from, std::size_t target);
+    void updateTabDragTarget(POINT point);
+    void startTabAnimation();
+    void tickTabAnimation();
+    [[nodiscard]] int tabVisualOffset(std::size_t documentIndex) const;
     void setActiveDocument(std::size_t index);
     void markActiveDocumentChanged();
     void onEditorSelectionChanged(std::size_t tickIndex);
@@ -168,6 +173,13 @@ private:
     bool draggingWindow_{false};
     POINT windowDragStartCursor_{};
     RECT windowDragStartBounds_{};
+    bool draggingTab_{false};
+    std::size_t draggedTabIndex_{0};
+    std::size_t tabDragTargetIndex_{0};
+    int tabDragGrabOffsetX_{0};
+    float tabDragTargetOffset_{0.0F};
+    std::vector<float> tabVisualOffsets_;
+    bool tabAnimating_{false};
     Page activePage_{Page::Workspace};
     OutputBackend outputBackend_{OutputBackend::WindowsApi};
     bool insertMode_{false};
