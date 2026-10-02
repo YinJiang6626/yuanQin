@@ -2,6 +2,7 @@
 #include "yuanqin/playback/MusicPlayer.h"
 
 #include <cstdlib>
+#include <chrono>
 #include <iostream>
 #include <string_view>
 #include <vector>
@@ -40,6 +41,7 @@ void require(bool condition, std::string_view message) {
 }  // namespace
 
 int main() {
+    using namespace std::chrono_literals;
     using yuanqin::core::ScoreParser;
     using yuanqin::playback::MusicPlayer;
     using yuanqin::playback::PlaybackOptions;
@@ -70,6 +72,7 @@ int main() {
     std::vector<std::size_t> progress;
     const auto pipaScore = ScoreParser::parseText("[AS]   /").score;
     options.startTick = 0;
+    options.arpeggioStepInterval = 0ms;
     const auto pipaResult = player.play(
         pipaScore, pipaSender, options, {},
         [&progress](std::size_t tick) { progress.push_back(tick); });
@@ -85,6 +88,16 @@ int main() {
     require(nestedPipaSender.chords == std::vector<std::vector<char>>{
                 {'A', 'S', 'D'}, {'A'}, {'D'}, {'F'}},
             "a pipa chord is emitted as one simultaneous step before individual notes");
+
+    RecordingSender fixedRatePipaSender;
+    const auto fixedRatePipaScore = ScoreParser::parseText("[AS]ZXC/D/").score;
+    options.bpm = 7500.0;  // Each smallest score unit is 2 ms.
+    options.arpeggioStepInterval = 3ms;
+    const auto fixedRatePipaResult = player.play(fixedRatePipaScore, fixedRatePipaSender, options);
+    require(fixedRatePipaResult.status == PlaybackStatus::Completed,
+            "fixed-rate arpeggio playback completes");
+    require(fixedRatePipaSender.notes == std::vector<char>({'A', 'S', 'D'}),
+            "a 6 ms pipa span skips the following three 2 ms score units");
 
     RecordingSender cancelledSender;
     const auto cancelled = player.play(score, cancelledSender, options, [] { return true; });

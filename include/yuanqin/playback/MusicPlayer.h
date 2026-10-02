@@ -14,9 +14,9 @@ struct PlaybackOptions {
     std::chrono::milliseconds startDelay{0};
     std::size_t startTick{0};
 
-    // Retains the timing used by the original program for bracketed pipa notes.
-    double arpeggioNoteSpanTicks{2.0};
-    std::size_t arpeggioOccupiedTicks{4};
+    // Each bracketed pipa step is emitted at this fixed interval.  Unlike the
+    // score tempo, this is intentionally expressed in real milliseconds.
+    std::chrono::milliseconds arpeggioStepInterval{107};
 };
 
 enum class PlaybackStatus {

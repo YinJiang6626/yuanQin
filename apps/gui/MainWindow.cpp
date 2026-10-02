@@ -26,11 +26,14 @@ namespace {
 
 constexpr wchar_t kMainWindowClassName[] = L"YuanQinMainWindow";
 constexpr int kHeaderHeight = 160;
-constexpr int kFooterHeight = 86;
+constexpr int kFooterHeight = 62;
 constexpr int kEditorControlId = 1001;
 constexpr int kBpmControlId = 1002;
 constexpr int kOutputBackendControlId = 1003;
 constexpr int kBpmCorrectionControlId = 1004;
+constexpr int kArpeggioIntervalControlId = 1005;
+constexpr int kTempoPanelCollapsedHeight = 28;
+constexpr int kTempoPanelMinimumHeight = 92;
 constexpr int kSidebarCollapsedWidth = 62;
 constexpr int kSidebarExpandedWidth = 132;
 constexpr int kSettingsHeaderHeight = 108;
@@ -302,6 +305,16 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
                              reinterpret_cast<LPARAM>(multiplier));
             }
             SendMessageW(bpmCorrectionCombo_, CB_SETCURSEL, 0, 0);
+            arpeggioIntervalEdit_ = CreateWindowExW(
+                0, L"EDIT", L"107", WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_NUMBER | ES_CENTER,
+                0, 0, 0, 0, window_,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kArpeggioIntervalControlId)),
+                instance_, nullptr);
+            if (!arpeggioIntervalEdit_) {
+                return -1;
+            }
+            SendMessageW(arpeggioIntervalEdit_, WM_SETFONT,
+                         reinterpret_cast<WPARAM>(interfaceFont_), TRUE);
             outputBackendCombo_ = CreateWindowExW(
                 0, L"COMBOBOX", L"",
                 WS_CHILD | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST,
@@ -329,7 +342,8 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
             return 0;
 
         case WM_CTLCOLOREDIT:
-            if (reinterpret_cast<HWND>(lParam) == bpmEdit_) {
+            if (reinterpret_cast<HWND>(lParam) == bpmEdit_ ||
+                reinterpret_cast<HWND>(lParam) == arpeggioIntervalEdit_) {
                 const HDC context = reinterpret_cast<HDC>(wParam);
                 SetTextColor(context, kDeepTeal);
                 SetBkColor(context, RGB(232, 247, 249));
@@ -339,12 +353,17 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
 
         case WM_COMMAND:
             if (LOWORD(wParam) == kBpmControlId && HIWORD(wParam) == EN_CHANGE) {
-                if (!updatingBpmEdit_ && activeDocument_ < documents_.size()) {
+                if (!updatingBpmEdit_ && !updatingTempoControls_ &&
+                    activeDocument_ < documents_.size()) {
                     wchar_t value[32]{};
                     GetWindowTextW(bpmEdit_, value, static_cast<int>(std::size(value)));
                     documents_[activeDocument_].bpmText = value;
                 }
                 InvalidateRect(window_, nullptr, FALSE);
+                return 0;
+            }
+            if (LOWORD(wParam) == kArpeggioIntervalControlId && HIWORD(wParam) == EN_CHANGE) {
+                updateArpeggioIntervalFromControl();
                 return 0;
             }
             if (LOWORD(wParam) == kBpmCorrectionControlId &&
@@ -365,11 +384,22 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
                 scrollSettingsBy(-steps * 54);
                 return 0;
             }
+            if (activePage_ == Page::Workspace || activePage_ == Page::Composition) {
+                POINT point{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+                ScreenToClient(window_, &point);
+                point.x -= sidebarWidth();
+                const RECT viewport = tempoPanelViewportBounds();
+                if (tempoPanelExpanded_ && PtInRect(&viewport, point)) {
+                    const int steps = GET_WHEEL_DELTA_WPARAM(wParam) / WHEEL_DELTA;
+                    scrollTempoPanelBy(-steps * 34);
+                    return 0;
+                }
+            }
             break;
 
         case WM_GETMINMAXINFO: {
             auto* info = reinterpret_cast<MINMAXINFO*>(lParam);
-            info->ptMinTrackSize = {880, 620};
+            info->ptMinTrackSize = {760, 620};
             return 0;
         }
 
@@ -405,6 +435,23 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
                         // overlay does not become active and therefore does not minimize it.
                         return MA_NOACTIVATE;
                     }
+                }
+            }
+            break;
+        }
+
+        case WM_SETCURSOR: {
+            if (LOWORD(lParam) != HTCLIENT || activePage_ == Page::SystemSettings) {
+                break;
+            }
+            POINT cursor{};
+            if (GetCursorPos(&cursor)) {
+                ScreenToClient(window_, &cursor);
+                cursor.x -= sidebarWidth();
+                const RECT resizeBounds = tempoPanelResizeBounds();
+                if (tempoPanelExpanded_ && PtInRect(&resizeBounds, cursor)) {
+                    SetCursor(LoadCursorW(nullptr, IDC_SIZENS));
+                    return TRUE;
                 }
             }
             break;
@@ -449,12 +496,20 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
 
             POINT point = windowPoint;
             point.x -= sidebarWidth();
-            RECT opacity = opacityBounds();
-            RECT opacityHit = opacity;
-            InflateRect(&opacityHit, 0, 12);
-            if (PtInRect(&opacityHit, point)) {
-                draggingOpacity_ = true;
-                setWindowOpacityFromX(point.x);
+            const RECT tempoToggle = tempoPanelToggleBounds();
+            if (PtInRect(&tempoToggle, point)) {
+                tempoPanelExpanded_ = !tempoPanelExpanded_;
+                tempoPanelScrollOffset_ = 0;
+                layoutChildren();
+                InvalidateRect(window_, nullptr, FALSE);
+                return 0;
+            }
+            const RECT tempoResize = tempoPanelResizeBounds();
+            if (tempoPanelExpanded_ && PtInRect(&tempoResize, point)) {
+                draggingTempoPanelResize_ = true;
+                tempoPanelResizeStartY_ = point.y;
+                tempoPanelResizeStartHeight_ = tempoPanelHeight_;
+                SetCursor(LoadCursorW(nullptr, IDC_SIZENS));
                 SetCapture(window_);
                 return 0;
             }
@@ -538,6 +593,22 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
                 }
                 return 0;
             }
+            if (draggingTempoPanelResize_) {
+                RECT client{};
+                GetClientRect(window_, &client);
+                const int delta = tempoPanelResizeStartY_ - GET_Y_LPARAM(lParam);
+                const int maximum = std::max(kTempoPanelMinimumHeight,
+                    static_cast<int>(client.bottom) - kHeaderHeight - kFooterHeight - 48);
+                tempoPanelHeight_ = std::clamp(tempoPanelResizeStartHeight_ + delta,
+                                               kTempoPanelMinimumHeight, maximum);
+                layoutChildren();
+                // Moving the child editor exposes its old bounds.  Force the
+                // parent and every child to repaint in this mouse turn so those
+                // exposed areas cannot leave a visual trail behind the panel.
+                RedrawWindow(window_, nullptr, nullptr,
+                             RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+                return 0;
+            }
             if (draggingOpacity_) {
                 setWindowOpacityFromX(GET_X_LPARAM(lParam) - sidebarWidth());
                 return 0;
@@ -567,6 +638,11 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
                 ReleaseCapture();
                 return 0;
             }
+            if (draggingTempoPanelResize_) {
+                draggingTempoPanelResize_ = false;
+                ReleaseCapture();
+                return 0;
+            }
             if (draggingOpacity_) {
                 setWindowOpacityFromX(GET_X_LPARAM(lParam) - sidebarWidth());
                 draggingOpacity_ = false;
@@ -592,6 +668,7 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
             draggingWindow_ = false;
             draggingOpacity_ = false;
             draggingSettingsScroll_ = false;
+            draggingTempoPanelResize_ = false;
             draggingTab_ = false;
             if (draggingProgress_) {
                 draggingProgress_ = false;
@@ -658,18 +735,34 @@ void MainWindow::destroyFonts() {
 
 void MainWindow::layoutChildren() {
     if (!window_ || !editor_.handle() || !bpmEdit_ || !bpmCorrectionCombo_ ||
-        !outputBackendCombo_) {
+        !arpeggioIntervalEdit_ || !outputBackendCombo_) {
         return;
     }
     RECT client{};
     GetClientRect(window_, &client);
     settingsScrollOffset_ = std::clamp(settingsScrollOffset_, 0, maximumSettingsScroll());
+    tempoPanelScrollOffset_ = std::clamp(tempoPanelScrollOffset_, 0, maximumTempoPanelScroll());
     const int sidebar = sidebarWidth();
     const int contentWidth = std::max(0, static_cast<int>(client.right) - sidebar);
+    const int tempoPanelHeight = tempoPanelCurrentHeight();
     MoveWindow(editor_.handle(), sidebar, kHeaderHeight, contentWidth,
-               std::max(0, static_cast<int>(client.bottom) - kHeaderHeight - kFooterHeight), TRUE);
-    MoveWindow(bpmEdit_, sidebar + 178, client.bottom - kFooterHeight + 43, 54, 27, TRUE);
-    MoveWindow(bpmCorrectionCombo_, sidebar + 284, client.bottom - kFooterHeight + 43, 78, 220, TRUE);
+               std::max(0, static_cast<int>(client.bottom) - kHeaderHeight -
+                               kFooterHeight - tempoPanelHeight), TRUE);
+
+    const TempoPanelLayout tempoLayout = tempoPanelLayout();
+    MoveWindow(bpmEdit_, sidebar + tempoLayout.bpm.controlBounds.left,
+               tempoLayout.bpm.controlBounds.top,
+               tempoLayout.bpm.controlBounds.right - tempoLayout.bpm.controlBounds.left, 27, TRUE);
+    MoveWindow(bpmCorrectionCombo_, sidebar + tempoLayout.correction.controlBounds.left,
+               tempoLayout.correction.controlBounds.top,
+               tempoLayout.correction.controlBounds.right -
+                   tempoLayout.correction.controlBounds.left,
+               220, TRUE);
+    MoveWindow(arpeggioIntervalEdit_, sidebar + tempoLayout.arpeggio.controlBounds.left,
+               tempoLayout.arpeggio.controlBounds.top,
+               tempoLayout.arpeggio.controlBounds.right -
+                   tempoLayout.arpeggio.controlBounds.left,
+               27, TRUE);
 
     const int settingsCardTop = kSettingsHeaderHeight + 28 - settingsScrollOffset_;
     MoveWindow(outputBackendCombo_, sidebar + 64, settingsCardTop + 92,
@@ -681,21 +774,21 @@ RECT MainWindow::playPauseBounds() const {
     RECT client{};
     GetClientRect(window_, &client);
     client.right = std::max<LONG>(0, client.right - sidebarWidth());
-    return {25, client.bottom - kFooterHeight + 36, 67, client.bottom - 10};
+    return {18, client.bottom - kFooterHeight + 10, 58, client.bottom - 10};
 }
 
 RECT MainWindow::playFromBeginningBounds() const {
     RECT client{};
     GetClientRect(window_, &client);
     client.right = std::max<LONG>(0, client.right - sidebarWidth());
-    return {75, client.bottom - kFooterHeight + 36, 117, client.bottom - 10};
+    return {66, client.bottom - kFooterHeight + 10, 106, client.bottom - 10};
 }
 
 RECT MainWindow::progressBounds() const {
     RECT client{};
     GetClientRect(window_, &client);
     client.right = std::max<LONG>(0, client.right - sidebarWidth());
-    return {392, client.bottom - 36, std::max(412L, client.right - 92), client.bottom - 28};
+    return {130, client.bottom - 37, std::max(150L, client.right - 92), client.bottom - 29};
 }
 
 RECT MainWindow::opacityBounds() const {
@@ -721,6 +814,80 @@ RECT MainWindow::editModeToggleBounds() const {
     // The input-mode control keeps a stable editor-header location. It is not
     // tied to the Save As button because the composition page has extra tools.
     return {std::max(0L, client.right - 124), 73, std::max(0L, client.right - 32), 99};
+}
+
+int MainWindow::tempoPanelCurrentHeight() const noexcept {
+    return tempoPanelExpanded_ ? tempoPanelHeight_ : kTempoPanelCollapsedHeight;
+}
+
+RECT MainWindow::tempoPanelBounds() const {
+    RECT client{};
+    GetClientRect(window_, &client);
+    client.right = std::max<LONG>(0, client.right - sidebarWidth());
+    const LONG bottom = client.bottom - kFooterHeight;
+    return {0, bottom - tempoPanelCurrentHeight(), client.right, bottom};
+}
+
+RECT MainWindow::tempoPanelToggleBounds() const {
+    const RECT panel = tempoPanelBounds();
+    const LONG center = (panel.left + panel.right) / 2;
+    return {center - 20, panel.top + 2, center + 20,
+            std::min(panel.bottom - 2, panel.top + 26)};
+}
+
+RECT MainWindow::tempoPanelResizeBounds() const {
+    const RECT panel = tempoPanelBounds();
+    return {panel.left, panel.top - 4, panel.right, panel.top + 5};
+}
+
+RECT MainWindow::tempoPanelViewportBounds() const {
+    const RECT panel = tempoPanelBounds();
+    return {panel.left + 22, panel.top + 30, panel.right - 22, panel.bottom - 9};
+}
+
+MainWindow::TempoPanelLayout MainWindow::tempoPanelLayout() const {
+    const RECT viewport = tempoPanelViewportBounds();
+    TempoPanelLayout layout{};
+    const int contentLeft = viewport.left;
+    const int contentRight = std::max(contentLeft + 1,
+                                      static_cast<int>(viewport.right - 18));
+    constexpr int kControlHeight = 27;
+    constexpr int kLabelGap = 8;
+    constexpr int kGroupGap = 24;
+    constexpr int kLineGap = 12;
+    int x = contentLeft;
+    int y = 0;
+    const auto placeSetting = [&](int labelWidth, int controlWidth) {
+        const int groupWidth = labelWidth + kLabelGap + controlWidth;
+        if (x > contentLeft && x + groupWidth > contentRight) {
+            x = contentLeft;
+            y += kControlHeight + kLineGap;
+        }
+        TempoSettingLayout setting;
+        setting.labelBounds = {x, viewport.top + y - tempoPanelScrollOffset_,
+                               x + labelWidth, viewport.top + y - tempoPanelScrollOffset_ +
+                                                   kControlHeight};
+        setting.controlBounds = {setting.labelBounds.right + kLabelGap, setting.labelBounds.top,
+                                 setting.labelBounds.right + kLabelGap + controlWidth,
+                                 setting.labelBounds.bottom};
+        x = setting.controlBounds.right + kGroupGap;
+        return setting;
+    };
+
+    layout.bpm = placeSetting(52, 82);
+    layout.correction = placeSetting(52, 92);
+    layout.arpeggio = placeSetting(156, 82);
+    layout.contentHeight = y + kControlHeight;
+    return layout;
+}
+
+int MainWindow::maximumTempoPanelScroll() const {
+    if (!tempoPanelExpanded_) {
+        return 0;
+    }
+    const RECT viewport = tempoPanelViewportBounds();
+    const int viewportHeight = std::max(0, static_cast<int>(viewport.bottom - viewport.top));
+    return std::max(0, tempoPanelLayout().contentHeight - viewportHeight);
 }
 
 int MainWindow::sidebarWidth() const noexcept {
@@ -821,14 +988,15 @@ bool MainWindow::shouldHandleWithoutActivation(POINT clientPoint) const {
     RECT playPause = playPauseBounds();
     RECT fromBeginning = playFromBeginningBounds();
     RECT progress = progressBounds();
-    RECT opacity = opacityBounds();
+    RECT tempoPanel = tempoPanelBounds();
+    RECT tempoResize = tempoPanelResizeBounds();
     const RECT headerDrag = headerDragBounds();
     RECT editModeToggle = editModeToggleBounds();
     InflateRect(&progress, 0, 12);
-    InflateRect(&opacity, 0, 12);
     if (PtInRect(&headerDrag, workspacePoint) || PtInRect(&playPause, workspacePoint) ||
         PtInRect(&fromBeginning, workspacePoint) ||
-        PtInRect(&progress, workspacePoint) || PtInRect(&opacity, workspacePoint) ||
+        PtInRect(&progress, workspacePoint) || PtInRect(&tempoPanel, workspacePoint) ||
+        PtInRect(&tempoResize, workspacePoint) ||
         PtInRect(&editModeToggle, workspacePoint)) {
         return true;
     }
@@ -1126,40 +1294,12 @@ void MainWindow::paint() {
     DrawTextW(context, L"─  拖动窗口  ─", -1, &dragHint,
               DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
+    paintTempoPanel(context, client);
+
     RECT footer{0, client.bottom - kFooterHeight, client.right, client.bottom};
     const HBRUSH footerBrush = CreateSolidBrush(RGB(23, 83, 101));
     FillRect(context, &footer, footerBrush);
     DeleteObject(footerBrush);
-    SelectObject(context, smallFont_);
-    SetTextColor(context, RGB(215, 241, 244));
-    RECT status{26, footer.top + 4, std::max(260L, client.right - 340), footer.top + 28};
-    DrawTextW(context, statusMessage_.c_str(), -1, &status,
-              DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-
-    const RECT opacity = opacityBounds();
-    const std::wstring opacityText = L"界面透明度 " +
-                                     std::to_wstring(windowOpacityPercent_) + L"%";
-    RECT opacityLabel{opacity.left - 158, footer.top + 2, opacity.left - 10, footer.top + 29};
-    SetTextColor(context, RGB(215, 241, 244));
-    DrawTextW(context, opacityText.c_str(), -1, &opacityLabel,
-              DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
-    fillRoundedRect(context, opacity, 6, RGB(69, 118, 133));
-    const double opacityRatio = static_cast<double>(windowOpacityPercent_ - 25) / 75.0;
-    RECT opacityFill = opacity;
-    opacityFill.right = opacity.left + static_cast<LONG>(std::round(
-        static_cast<double>(opacity.right - opacity.left) * opacityRatio));
-    if (opacityFill.right > opacityFill.left) {
-        fillRoundedRect(context, opacityFill, 6, RGB(91, 211, 211));
-    }
-    const int opacityHandleX = opacityFill.right;
-    const HBRUSH opacityHandleBrush = CreateSolidBrush(RGB(226, 219, 249));
-    const auto oldOpacityBrush = SelectObject(context, opacityHandleBrush);
-    const auto oldOpacityPen = SelectObject(context, GetStockObject(NULL_PEN));
-    Ellipse(context, opacityHandleX - 6, opacity.top - 4,
-            opacityHandleX + 6, opacity.bottom + 4);
-    SelectObject(context, oldOpacityPen);
-    SelectObject(context, oldOpacityBrush);
-    DeleteObject(opacityHandleBrush);
 
     const RECT playPause = playPauseBounds();
     const RECT fromBeginning = playFromBeginningBounds();
@@ -1195,14 +1335,6 @@ void MainWindow::paint() {
     SelectObject(context, previousBrush);
     DeleteObject(iconBrush);
 
-    SelectObject(context, smallFont_);
-    SetTextColor(context, RGB(184, 226, 231));
-    RECT bpmLabel{131, footer.top + 40, 174, footer.bottom - 10};
-    DrawTextW(context, L"BPM", -1, &bpmLabel, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-    RECT correctionLabel{236, footer.top + 40, 278, footer.bottom - 10};
-    DrawTextW(context, L"补正", -1, &correctionLabel,
-              DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-
     const RECT progress = progressBounds();
     RECT progressTrack = progress;
     fillRoundedRect(context, progressTrack, 8, RGB(69, 118, 133));
@@ -1231,7 +1363,7 @@ void MainWindow::paint() {
     const double bpm = playbackBpm();
     const std::wstring timeText = formatTime(std::min(visibleTick, transportTotalTicks_), bpm) +
                                   L" / " + formatTime(transportTotalTicks_, bpm);
-    RECT timeRect{progress.right + 8, footer.top + 34, client.right - 10, footer.bottom - 8};
+    RECT timeRect{progress.right + 8, footer.top + 8, client.right - 8, footer.bottom - 8};
     SetTextColor(context, RGB(213, 239, 243));
     DrawTextW(context, timeText.c_str(), -1, &timeRect,
               DT_CENTER | DT_VCENTER | DT_SINGLELINE);
@@ -1244,6 +1376,77 @@ void MainWindow::paint() {
     DeleteObject(bitmap);
     DeleteDC(context);
     EndPaint(window_, &paintStruct);
+}
+
+void MainWindow::paintTempoPanel(HDC context, const RECT& client) {
+    RECT panel = tempoPanelBounds();
+    panel.right = std::min(panel.right, client.right);
+    const HBRUSH panelBrush = CreateSolidBrush(RGB(31, 104, 123));
+    FillRect(context, &panel, panelBrush);
+    DeleteObject(panelBrush);
+
+    const HPEN topEdge = CreatePen(PS_SOLID, 1, RGB(103, 193, 205));
+    const auto oldEdge = SelectObject(context, topEdge);
+    MoveToEx(context, panel.left, panel.top, nullptr);
+    LineTo(context, panel.right, panel.top);
+    SelectObject(context, oldEdge);
+    DeleteObject(topEdge);
+
+    const RECT toggle = tempoPanelToggleBounds();
+    fillRoundedRect(context, toggle, 10, RGB(57, 137, 155));
+    SelectObject(context, smallFont_);
+    SetTextColor(context, RGB(211, 240, 243));
+    RECT status{20, panel.top + 2, std::max(21L, toggle.left - 12), panel.top + 26};
+    DrawTextW(context, statusMessage_.c_str(), -1, &status,
+              DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    const int centerX = (toggle.left + toggle.right) / 2;
+    const int centerY = (toggle.top + toggle.bottom) / 2;
+    const std::array<POINT, 3> chevron = tempoPanelExpanded_
+        ? std::array<POINT, 3>{{{centerX - 6, centerY - 3}, {centerX + 6, centerY - 3},
+                                {centerX, centerY + 4}}}
+        : std::array<POINT, 3>{{{centerX - 6, centerY + 3}, {centerX + 6, centerY + 3},
+                                {centerX, centerY - 4}}};
+    const HBRUSH chevronBrush = CreateSolidBrush(RGB(224, 245, 247));
+    const auto oldChevronBrush = SelectObject(context, chevronBrush);
+    const auto oldChevronPen = SelectObject(context, GetStockObject(NULL_PEN));
+    Polygon(context, chevron.data(), static_cast<int>(chevron.size()));
+    SelectObject(context, oldChevronPen);
+    SelectObject(context, oldChevronBrush);
+    DeleteObject(chevronBrush);
+
+    if (!tempoPanelExpanded_) {
+        return;
+    }
+
+    const RECT viewport = tempoPanelViewportBounds();
+    const TempoPanelLayout tempoLayout = tempoPanelLayout();
+    const int saved = SaveDC(context);
+    IntersectClipRect(context, viewport.left, viewport.top, viewport.right, viewport.bottom);
+    SelectObject(context, interfaceFont_);
+    SetTextColor(context, RGB(229, 247, 248));
+    RECT bpmLabel = tempoLayout.bpm.labelBounds;
+    DrawTextW(context, L"BPM", -1, &bpmLabel, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    RECT correctionLabel = tempoLayout.correction.labelBounds;
+    DrawTextW(context, L"补正", -1, &correctionLabel, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    RECT pipaLabel = tempoLayout.arpeggio.labelBounds;
+    DrawTextW(context, L"琵琶音间隔（ms）", -1, &pipaLabel,
+              DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    RestoreDC(context, saved);
+
+    const int maximum = maximumTempoPanelScroll();
+    if (maximum > 0) {
+        RECT track{panel.right - 13, viewport.top, panel.right - 7, viewport.bottom};
+        fillRoundedRect(context, track, 4, RGB(79, 152, 166));
+        const int viewportHeight = std::max(1L, viewport.bottom - viewport.top);
+        const int thumbHeight = std::max(18, viewportHeight * viewportHeight /
+                                                   std::max(viewportHeight,
+                                                            tempoLayout.contentHeight));
+        const int travel = std::max(0, viewportHeight - thumbHeight);
+        RECT thumb = track;
+        thumb.top += maximum == 0 ? 0 : travel * tempoPanelScrollOffset_ / maximum;
+        thumb.bottom = thumb.top + thumbHeight;
+        fillRoundedRect(context, thumb, 4, RGB(184, 231, 235));
+    }
 }
 
 void MainWindow::paintSidebar(HDC context, const RECT& client) {
@@ -1425,13 +1628,26 @@ void MainWindow::toggleSidebar() {
 }
 
 void MainWindow::updatePageVisibility() {
-    if (!editor_.handle() || !bpmEdit_ || !bpmCorrectionCombo_ || !outputBackendCombo_) {
+    if (!editor_.handle() || !bpmEdit_ || !bpmCorrectionCombo_ || !arpeggioIntervalEdit_ ||
+        !outputBackendCombo_) {
         return;
     }
     const bool workspaceVisible = activePage_ == Page::Workspace || activePage_ == Page::Composition;
+    const RECT tempoViewport = tempoPanelViewportBounds();
+    const TempoPanelLayout tempoLayout = tempoPanelLayout();
+    const auto controlVisible = [&tempoViewport](const RECT& bounds) {
+        return bounds.top >= tempoViewport.top && bounds.bottom <= tempoViewport.bottom;
+    };
     ShowWindow(editor_.handle(), workspaceVisible ? SW_SHOW : SW_HIDE);
-    ShowWindow(bpmEdit_, workspaceVisible ? SW_SHOW : SW_HIDE);
-    ShowWindow(bpmCorrectionCombo_, workspaceVisible ? SW_SHOW : SW_HIDE);
+    ShowWindow(bpmEdit_, workspaceVisible && tempoPanelExpanded_ &&
+                            controlVisible(tempoLayout.bpm.controlBounds)
+                            ? SW_SHOW : SW_HIDE);
+    ShowWindow(bpmCorrectionCombo_, workspaceVisible && tempoPanelExpanded_ &&
+                                         controlVisible(tempoLayout.correction.controlBounds)
+                                     ? SW_SHOW : SW_HIDE);
+    ShowWindow(arpeggioIntervalEdit_, workspaceVisible && tempoPanelExpanded_ &&
+                                            controlVisible(tempoLayout.arpeggio.controlBounds)
+                                        ? SW_SHOW : SW_HIDE);
     ShowWindow(outputBackendCombo_, workspaceVisible ? SW_HIDE : SW_SHOW);
 }
 
@@ -1440,7 +1656,8 @@ void MainWindow::syncBpmEditor() {
 }
 
 void MainWindow::syncTempoControls() {
-    if (!bpmEdit_ || !bpmCorrectionCombo_ || activeDocument_ >= documents_.size()) {
+    if (!bpmEdit_ || !bpmCorrectionCombo_ || !arpeggioIntervalEdit_ ||
+        activeDocument_ >= documents_.size()) {
         return;
     }
     updatingBpmEdit_ = true;
@@ -1452,6 +1669,8 @@ void MainWindow::syncTempoControls() {
         ? 0
         : static_cast<LRESULT>(std::distance(kBpmCorrections.begin(), match));
     SendMessageW(bpmCorrectionCombo_, CB_SETCURSEL, selection, 0);
+    SetWindowTextW(arpeggioIntervalEdit_,
+                   std::to_wstring(documents_[activeDocument_].arpeggioIntervalMs).c_str());
     updatingTempoControls_ = false;
     updatingBpmEdit_ = false;
 }
@@ -1481,6 +1700,32 @@ void MainWindow::updateBpmCorrectionFromControl() {
         : 0;
     documents_[activeDocument_].bpmCorrection = kBpmCorrections[index];
     setStatus(L"BPM 补正已设为 ×" + std::to_wstring(kBpmCorrections[index]));
+    InvalidateRect(window_, nullptr, FALSE);
+}
+
+void MainWindow::updateArpeggioIntervalFromControl() {
+    if (updatingTempoControls_ || !arpeggioIntervalEdit_ ||
+        activeDocument_ >= documents_.size()) {
+        return;
+    }
+    wchar_t value[32]{};
+    GetWindowTextW(arpeggioIntervalEdit_, value, static_cast<int>(std::size(value)));
+    wchar_t* end = nullptr;
+    const long parsed = std::wcstol(value, &end, 10);
+    documents_[activeDocument_].arpeggioIntervalMs =
+        end != value && end && *end == L'\0' && parsed > 0 && parsed <= 10000
+            ? static_cast<int>(parsed)
+            : 0;
+    InvalidateRect(window_, nullptr, FALSE);
+}
+
+void MainWindow::scrollTempoPanelBy(int delta) {
+    const int next = std::clamp(tempoPanelScrollOffset_ + delta, 0, maximumTempoPanelScroll());
+    if (next == tempoPanelScrollOffset_) {
+        return;
+    }
+    tempoPanelScrollOffset_ = next;
+    layoutChildren();
     InvalidateRect(window_, nullptr, FALSE);
 }
 
@@ -1828,6 +2073,12 @@ double MainWindow::playbackBpm() const {
         : 0.0;
 }
 
+int MainWindow::arpeggioIntervalMs() const {
+    return activeDocument_ < documents_.size()
+        ? documents_[activeDocument_].arpeggioIntervalMs
+        : 0;
+}
+
 std::size_t MainWindow::activeScoreTickCount() const {
     if (activeDocument_ >= documents_.size()) {
         return 1;
@@ -1882,6 +2133,16 @@ void MainWindow::startPlayback(std::size_t tickIndex) {
     if (bpm <= 0.0) {
         setStatus(L"请输入大于 0 的 BPM");
         SetFocus(bpmEdit_);
+        return;
+    }
+    const int pipaInterval = arpeggioIntervalMs();
+    if (pipaInterval <= 0) {
+        setStatus(L"请输入 1 到 10000 之间的琵琶音间隔（毫秒）");
+        if (!tempoPanelExpanded_) {
+            tempoPanelExpanded_ = true;
+            layoutChildren();
+        }
+        SetFocus(arpeggioIntervalEdit_);
         return;
     }
 
@@ -1960,11 +2221,13 @@ void MainWindow::startPlayback(std::size_t tickIndex) {
     editor_.setPlayheadTick(tickIndex, true);
     EnableWindow(bpmEdit_, FALSE);
     EnableWindow(bpmCorrectionCombo_, FALSE);
+    EnableWindow(arpeggioIntervalEdit_, FALSE);
     playbackRunning_ = true;
     const std::uint64_t generation = ++playbackGeneration_;
     playback::PlaybackOptions options;
     options.bpm = bpm;
     options.startTick = tickIndex;
+    options.arpeggioStepInterval = std::chrono::milliseconds(pipaInterval);
     core::Score score = std::move(parseResult.score);
 
     playbackThread_ = std::jthread(
@@ -2005,6 +2268,9 @@ void MainWindow::stopPlayback(bool unlockEditor, bool restoreCompositionSelectio
         }
         if (bpmCorrectionCombo_) {
             EnableWindow(bpmCorrectionCombo_, TRUE);
+        }
+        if (arpeggioIntervalEdit_) {
+            EnableWindow(arpeggioIntervalEdit_, TRUE);
         }
         InvalidateRect(window_, nullptr, FALSE);
     }
@@ -2095,6 +2361,7 @@ void MainWindow::handlePlaybackComplete(std::uint64_t generation, int status) {
     editor_.setPlaybackActive(false);
     EnableWindow(bpmEdit_, TRUE);
     EnableWindow(bpmCorrectionCombo_, TRUE);
+    EnableWindow(arpeggioIntervalEdit_, TRUE);
     if (status == static_cast<int>(playback::PlaybackStatus::Completed)) {
         transportTick_ = transportTotalTicks_;
         if (transportTotalTicks_ > 0) {

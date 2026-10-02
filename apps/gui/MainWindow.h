@@ -46,6 +46,8 @@ private:
         std::string savedText;
         std::wstring bpmText{L"80"};
         int bpmCorrection{1};
+        // 4 minimum units at BPM 80 last 750 ms; 750 / 7 rounds to 107 ms.
+        int arpeggioIntervalMs{107};
         ui::ScoreEditor::Hand activeHand{ui::ScoreEditor::Hand::Right};
         std::size_t selectionAnchor{};
         std::size_t selectionCaret{};
@@ -66,6 +68,18 @@ private:
         std::size_t index{};
     };
 
+    struct TempoSettingLayout {
+        RECT labelBounds{};
+        RECT controlBounds{};
+    };
+
+    struct TempoPanelLayout {
+        TempoSettingLayout bpm;
+        TempoSettingLayout correction;
+        TempoSettingLayout arpeggio;
+        int contentHeight{};
+    };
+
     static LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wParam,
                                              LPARAM lParam);
     LRESULT handleMessage(UINT message, WPARAM wParam, LPARAM lParam);
@@ -83,12 +97,14 @@ private:
     void syncTempoControls();
     void updateOutputBackendFromControl();
     void updateBpmCorrectionFromControl();
+    void updateArpeggioIntervalFromControl();
     void recordActiveDocumentHistory();
     void undoActiveDocument();
     void redoActiveDocument();
     void toggleInsertMode();
     void scrollSettingsBy(int delta);
     void setSettingsScrollFromY(int y);
+    void scrollTempoPanelBy(int delta);
     void newDocument();
     void openDocument();
     bool saveDocument(std::size_t index);
@@ -118,6 +134,7 @@ private:
     void updateWindowTitle();
     void setStatus(std::wstring message);
     [[nodiscard]] double playbackBpm() const;
+    [[nodiscard]] int arpeggioIntervalMs() const;
     [[nodiscard]] std::size_t activeScoreTickCount() const;
     [[nodiscard]] std::size_t progressTickFromX(int x) const;
     void setWindowOpacityFromX(int x);
@@ -128,6 +145,14 @@ private:
     [[nodiscard]] RECT opacityBounds() const;
     [[nodiscard]] RECT headerDragBounds() const;
     [[nodiscard]] RECT editModeToggleBounds() const;
+    [[nodiscard]] RECT tempoPanelBounds() const;
+    [[nodiscard]] RECT tempoPanelToggleBounds() const;
+    [[nodiscard]] RECT tempoPanelResizeBounds() const;
+    [[nodiscard]] RECT tempoPanelViewportBounds() const;
+    [[nodiscard]] TempoPanelLayout tempoPanelLayout() const;
+    [[nodiscard]] int tempoPanelCurrentHeight() const noexcept;
+    [[nodiscard]] int maximumTempoPanelScroll() const;
+    void paintTempoPanel(HDC context, const RECT& client);
     [[nodiscard]] RECT sidebarSettingsBounds() const;
     [[nodiscard]] RECT sidebarWorkspaceBounds() const;
     [[nodiscard]] RECT sidebarCompositionBounds() const;
@@ -151,6 +176,7 @@ private:
     HINSTANCE instance_{nullptr};
     HWND bpmEdit_{nullptr};
     HWND bpmCorrectionCombo_{nullptr};
+    HWND arpeggioIntervalEdit_{nullptr};
     HWND outputBackendCombo_{nullptr};
     HBRUSH bpmEditBrush_{nullptr};
     ui::ScoreEditor editor_;
@@ -193,6 +219,12 @@ private:
     bool sidebarExpanded_{false};
     int settingsScrollOffset_{0};
     bool draggingSettingsScroll_{false};
+    bool tempoPanelExpanded_{true};
+    int tempoPanelHeight_{120};
+    int tempoPanelScrollOffset_{0};
+    bool draggingTempoPanelResize_{false};
+    int tempoPanelResizeStartY_{0};
+    int tempoPanelResizeStartHeight_{0};
     bool updatingBpmEdit_{false};
     bool updatingTempoControls_{false};
 };
