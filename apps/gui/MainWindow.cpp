@@ -1915,9 +1915,14 @@ void MainWindow::startPlayback(std::size_t tickIndex) {
         return;
     }
 
-    stopPlayback();
+    const bool wasPlaying = playbackRunning_;
+    if (!wasPlaying) {
+        capturePlaybackSelection();
+    }
+    stopPlayback(true, false);
     const HWND gameWindow = playback::GenshinWindowTarget::find();
     if (!gameWindow || !playback::GenshinWindowTarget::activate(gameWindow, window_)) {
+        restorePlaybackSelection();
         setStatus(L"未找到或无法激活原神窗口 · 请先启动原神并保持窗口化或无边框模式");
         return;
     }
@@ -1928,6 +1933,7 @@ void MainWindow::startPlayback(std::size_t tickIndex) {
     } else {
         auto virtualHidSender = std::make_unique<playback::VirtualHidKeySender>();
         if (!virtualHidSender->isOpen()) {
+            restorePlaybackSelection();
             setStatus(L"虚拟 HID 驱动未安装或未启动 · 可在系统设置中改用 Windows API");
             return;
         }
@@ -1966,7 +1972,7 @@ void MainWindow::startPlayback(std::size_t tickIndex) {
     InvalidateRect(window_, nullptr, FALSE);
 }
 
-void MainWindow::stopPlayback(bool unlockEditor) {
+void MainWindow::stopPlayback(bool unlockEditor, bool restoreCompositionSelection) {
     ++playbackGeneration_;
     if (playbackThread_.joinable()) {
         playbackThread_.request_stop();
@@ -1975,6 +1981,9 @@ void MainWindow::stopPlayback(bool unlockEditor) {
     playbackRunning_ = false;
     if (unlockEditor) {
         editor_.setPlaybackActive(false);
+        if (restoreCompositionSelection) {
+            restorePlaybackSelection();
+        }
         if (bpmEdit_) {
             EnableWindow(bpmEdit_, TRUE);
         }
@@ -1983,6 +1992,41 @@ void MainWindow::stopPlayback(bool unlockEditor) {
         }
         InvalidateRect(window_, nullptr, FALSE);
     }
+}
+
+void MainWindow::capturePlaybackSelection() {
+    playbackSelectionRestorePending_ = false;
+    if (activeDocument_ >= documents_.size() ||
+        documents_[activeDocument_].kind != DocumentKind::Composition) {
+        return;
+    }
+
+    playbackSelectionRestorePending_ = true;
+    playbackSelectionDocument_ = activeDocument_;
+    playbackSelectionAnchor_ = editor_.selectionAnchorTick();
+    playbackSelectionCaret_ = editor_.selectionCaretTick();
+    playbackSelectionHand_ = editor_.activeHand();
+}
+
+void MainWindow::restorePlaybackSelection() {
+    if (!playbackSelectionRestorePending_) {
+        return;
+    }
+    playbackSelectionRestorePending_ = false;
+    if (playbackSelectionDocument_ != activeDocument_ ||
+        activeDocument_ >= documents_.size() ||
+        documents_[activeDocument_].kind != DocumentKind::Composition) {
+        return;
+    }
+
+    const std::size_t playbackTick = transportTick_;
+    auto& tab = documents_[activeDocument_];
+    tab.activeHand = playbackSelectionHand_;
+    tab.selectionAnchor = playbackSelectionAnchor_;
+    tab.selectionCaret = playbackSelectionCaret_;
+    editor_.setActiveHand(playbackSelectionHand_);
+    editor_.setSelectionRange(playbackSelectionAnchor_, playbackSelectionCaret_);
+    transportTick_ = playbackTick;
 }
 
 void MainWindow::togglePlayback() {
@@ -2046,6 +2090,7 @@ void MainWindow::handlePlaybackComplete(std::uint64_t generation, int status) {
                       ? L"播放中断：Windows API 按键发送失败"
                       : L"播放中断：虚拟 HID 驱动通信失败 · 请检查设备管理器中的 Yuanqin Virtual HID Keyboard");
     }
+    restorePlaybackSelection();
     InvalidateRect(window_, nullptr, FALSE);
 }
 

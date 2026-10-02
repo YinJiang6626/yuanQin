@@ -107,7 +107,9 @@ private:
     void onEditorSelectionChanged(std::size_t tickIndex);
     void invoke(ToolbarAction action);
     void startPlayback(std::size_t tickIndex);
-    void stopPlayback(bool unlockEditor = true);
+    void stopPlayback(bool unlockEditor = true, bool restoreCompositionSelection = true);
+    void capturePlaybackSelection();
+    void restorePlaybackSelection();
     void togglePlayback();
     void playFromBeginning();
     void seekTo(std::size_t tickIndex, bool keepPlaying);
@@ -163,6 +165,11 @@ private:
     std::jthread playbackThread_;
     bool playbackRunning_{false};
     std::uint64_t playbackGeneration_{0};
+    bool playbackSelectionRestorePending_{false};
+    std::size_t playbackSelectionDocument_{0};
+    std::size_t playbackSelectionAnchor_{0};
+    std::size_t playbackSelectionCaret_{0};
+    ui::ScoreEditor::Hand playbackSelectionHand_{ui::ScoreEditor::Hand::Right};
     std::size_t transportTick_{0};
     std::size_t transportTotalTicks_{1};
     bool draggingProgress_{false};

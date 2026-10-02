@@ -668,6 +668,40 @@ void ScoreEditor::paint() {
         }
     }
 
+    // In composition playback the two hands form one musical instant.  Render one
+    // frame around the paired cells so the playhead is read as a single chord,
+    // rather than two unrelated single-line selections.
+    if (playbackActive_ && isComposition()) {
+        const std::size_t playbackTick = selectedTick();
+        const auto rightCell = std::find_if(cells.begin(), cells.end(), [playbackTick](const CellLayout& cell) {
+            return cell.hand == Hand::Right &&
+                   cell.measureIndex * kBeatsPerMeasure + cell.beatIndex == playbackTick;
+        });
+        const auto leftCell = std::find_if(cells.begin(), cells.end(), [playbackTick](const CellLayout& cell) {
+            return cell.hand == Hand::Left &&
+                   cell.measureIndex * kBeatsPerMeasure + cell.beatIndex == playbackTick;
+        });
+        if (rightCell != cells.end() && leftCell != cells.end()) {
+            RECT highlight{
+                std::min(rightCell->bounds.left, leftCell->bounds.left),
+                std::min(rightCell->bounds.top, leftCell->bounds.top),
+                std::max(rightCell->bounds.right, leftCell->bounds.right),
+                std::max(rightCell->bounds.bottom, leftCell->bounds.bottom)};
+            if (highlight.bottom >= 0 && highlight.top <= client.bottom) {
+                InflateRect(&highlight, -3, -5);
+                fillRoundedRect(context, highlight, 9, RGB(214, 246, 245));
+                const HPEN selectionPen = CreatePen(PS_SOLID, 2, RGB(39, 170, 176));
+                const auto oldPen = SelectObject(context, selectionPen);
+                const auto oldBrush = SelectObject(context, GetStockObject(NULL_BRUSH));
+                RoundRect(context, highlight.left, highlight.top,
+                          highlight.right, highlight.bottom, 9, 9);
+                SelectObject(context, oldBrush);
+                SelectObject(context, oldPen);
+                DeleteObject(selectionPen);
+            }
+        }
+    }
+
     for (std::size_t index = 0; index < cells.size(); ++index) {
         const auto& cell = cells[index];
         if (cell.bounds.bottom < 0 || cell.bounds.top > client.bottom) {
@@ -677,10 +711,10 @@ void ScoreEditor::paint() {
         const std::size_t cellTick = cell.measureIndex * kBeatsPerMeasure + cell.beatIndex;
         const bool playbackCell = playbackActive_ && isComposition() &&
                                   cellTick == selectedTick();
-        const bool selected = playbackCell || (activeDocument() && cell.hand == activeHand_ &&
+        const bool selected = !playbackCell && (activeDocument() && cell.hand == activeHand_ &&
                               cellTick >= selectionStartTick() &&
                               cellTick <= selectionEndTick());
-        const bool caret = playbackCell || (activeDocument() && cell.hand == activeHand_ &&
+        const bool caret = !playbackCell && (activeDocument() && cell.hand == activeHand_ &&
                            cell.measureIndex == selectedMeasure_ &&
                            cell.beatIndex == selectedBeat_);
         if (selected) {
