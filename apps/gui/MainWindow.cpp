@@ -2072,6 +2072,11 @@ void MainWindow::toggleInsertMode() {
 void MainWindow::newDocument() {
     DocumentTab tab;
     tab.kind = activePage_ == Page::Composition ? DocumentKind::Composition : DocumentKind::Standard;
+    // New tabs, including the startup editor/composition tabs, begin with the
+    // values selected in System Settings.  Later edits remain per-document.
+    tab.bpmText = systemSettings_.defaultBpmText;
+    tab.bpmCorrection = systemSettings_.defaultBpmCorrection;
+    tab.arpeggioIntervalMs = systemSettings_.defaultArpeggioIntervalMs;
     tab.displayName = (tab.kind == DocumentKind::Composition ? L"未命名创作 " : L"未命名 ") +
                       std::to_wstring(untitledCounter_++);
     tab.savedText = serializedDocument(tab);
