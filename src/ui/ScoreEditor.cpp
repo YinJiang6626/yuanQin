@@ -428,8 +428,21 @@ LRESULT ScoreEditor::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
                     if (!extendSelection && moveGroupCaret(1)) return 0;
                     moveSelection(1, extendSelection);
                     return 0;
-                case VK_UP: moveSelection(-static_cast<long long>(kBeatsPerMeasure * kMeasuresPerRow), extendSelection); return 0;
-                case VK_DOWN: moveSelection(kBeatsPerMeasure * kMeasuresPerRow, extendSelection); return 0;
+                case VK_UP:
+                    if (isComposition()) {
+                        moveCompositionRow(-1, extendSelection);
+                    } else {
+                        moveSelection(-static_cast<long long>(kBeatsPerMeasure * kMeasuresPerRow),
+                                      extendSelection);
+                    }
+                    return 0;
+                case VK_DOWN:
+                    if (isComposition()) {
+                        moveCompositionRow(1, extendSelection);
+                    } else {
+                        moveSelection(kBeatsPerMeasure * kMeasuresPerRow, extendSelection);
+                    }
+                    return 0;
                 case VK_TAB: return 0;
                 case VK_HOME:
                     setCaretTick((selectedTick() / kBeatsPerMeasure) * kBeatsPerMeasure,
@@ -929,6 +942,44 @@ void ScoreEditor::moveSelection(long long beatDelta, bool extendSelection) {
     const long long current = static_cast<long long>(selectedTick());
     const long long next = std::max(0LL, current + beatDelta);
     setCaretTick(static_cast<std::size_t>(next), extendSelection);
+}
+
+void ScoreEditor::moveCompositionRow(int direction, bool extendSelection) {
+    if (!isComposition() || direction == 0) {
+        return;
+    }
+    if (!extendSelection && hasSelection()) {
+        collapseSelectionForMove(direction > 0);
+        return;
+    }
+
+    const std::size_t rowTickCount = kBeatsPerMeasure * kMeasuresPerRow;
+    const std::size_t tick = selectedTick();
+    if (direction < 0) {
+        if (activeHand_ == Hand::Left) {
+            activeHand_ = Hand::Right;
+        } else if (tick >= rowTickCount) {
+            activeHand_ = Hand::Left;
+            setCaretTick(tick - rowTickCount, extendSelection);
+            return;
+        } else {
+            return;
+        }
+    } else if (activeHand_ == Hand::Right) {
+        activeHand_ = Hand::Left;
+    } else {
+        activeHand_ = Hand::Right;
+        setCaretTick(tick + rowTickCount, extendSelection);
+        return;
+    }
+
+    groupEditing_ = false;
+    resetGroupCaret();
+    ensureSelectionVisible();
+    if (window_) {
+        InvalidateRect(window_, nullptr, FALSE);
+    }
+    notifySelectionChanged();
 }
 
 void ScoreEditor::resetGroupCaret() {

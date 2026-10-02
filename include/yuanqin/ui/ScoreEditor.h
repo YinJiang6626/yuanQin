@@ -67,6 +67,7 @@ private:
     void notifyChanged();
     void notifySelectionChanged();
     void moveSelection(long long beatDelta, bool extendSelection = false);
+    void moveCompositionRow(int direction, bool extendSelection);
     void setCaretTick(std::size_t tickIndex, bool extendSelection);
     void collapseSelectionForMove(bool towardEnd);
     void replaceSelection(const std::vector<std::string>& values, bool insertBefore);
