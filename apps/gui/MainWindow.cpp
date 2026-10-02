@@ -13,12 +13,14 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <exception>
 #include <fstream>
 #include <iomanip>
 #include <iterator>
 #include <memory>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <utility>
 
 namespace yuanqin::app {
@@ -32,13 +34,16 @@ constexpr int kBpmControlId = 1002;
 constexpr int kOutputBackendControlId = 1003;
 constexpr int kBpmCorrectionControlId = 1004;
 constexpr int kArpeggioIntervalControlId = 1005;
+constexpr int kDefaultBpmControlId = 1006;
+constexpr int kDefaultBpmCorrectionControlId = 1007;
+constexpr int kDefaultArpeggioIntervalControlId = 1008;
 constexpr int kTempoPanelCollapsedHeight = 28;
 constexpr int kTempoPanelMinimumHeight = 92;
 constexpr int kSidebarCollapsedWidth = 62;
 constexpr int kSidebarExpandedWidth = 132;
 constexpr int kSettingsHeaderHeight = 108;
-constexpr int kSettingsContentHeight = 590;
-constexpr std::array<int, 5> kBpmCorrections{1, 2, 4, 8, 32};
+constexpr int kSettingsContentHeight = 800;
+constexpr std::array<int, 5> kBpmCorrections{1, 2, 4, 8, 16};
 constexpr UINT kPlaybackProgressMessage = WM_APP + 11;
 constexpr UINT kPlaybackCompleteMessage = WM_APP + 12;
 constexpr UINT_PTR kTabAnimationTimer = 1;
@@ -174,6 +179,8 @@ MainWindow::~MainWindow() {
 
 bool MainWindow::create(HINSTANCE instance, int showCommand) {
     instance_ = instance;
+    loadSystemSettings();
+    outputBackend_ = systemSettings_.outputBackend;
 
     WNDCLASSEXW windowClass{};
     windowClass.cbSize = sizeof(windowClass);
@@ -300,7 +307,7 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
             }
             SendMessageW(bpmCorrectionCombo_, WM_SETFONT,
                          reinterpret_cast<WPARAM>(interfaceFont_), TRUE);
-            for (const wchar_t* multiplier : {L"×1", L"×2", L"×4", L"×8", L"×32"}) {
+            for (const wchar_t* multiplier : {L"×1", L"×2", L"×4", L"×8", L"×16"}) {
                 SendMessageW(bpmCorrectionCombo_, CB_ADDSTRING, 0,
                              reinterpret_cast<LPARAM>(multiplier));
             }
@@ -330,7 +337,34 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
                          reinterpret_cast<LPARAM>(L"Windows API"));
             SendMessageW(outputBackendCombo_, CB_ADDSTRING, 0,
                          reinterpret_cast<LPARAM>(L"虚拟 HID 驱动"));
-            SendMessageW(outputBackendCombo_, CB_SETCURSEL, 0, 0);
+            defaultBpmEdit_ = CreateWindowExW(
+                0, L"EDIT", L"80", WS_CHILD | WS_TABSTOP | ES_NUMBER | ES_CENTER,
+                0, 0, 0, 0, window_,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kDefaultBpmControlId)),
+                instance_, nullptr);
+            defaultBpmCorrectionCombo_ = CreateWindowExW(
+                0, L"COMBOBOX", L"", WS_CHILD | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST,
+                0, 0, 0, 0, window_,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kDefaultBpmCorrectionControlId)),
+                instance_, nullptr);
+            defaultArpeggioIntervalEdit_ = CreateWindowExW(
+                0, L"EDIT", L"107", WS_CHILD | WS_TABSTOP | ES_NUMBER | ES_CENTER,
+                0, 0, 0, 0, window_,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kDefaultArpeggioIntervalControlId)),
+                instance_, nullptr);
+            if (!defaultBpmEdit_ || !defaultBpmCorrectionCombo_ ||
+                !defaultArpeggioIntervalEdit_) {
+                return -1;
+            }
+            for (HWND control : {defaultBpmEdit_, defaultBpmCorrectionCombo_,
+                                 defaultArpeggioIntervalEdit_}) {
+                SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(interfaceFont_), TRUE);
+            }
+            for (const wchar_t* multiplier : {L"×1", L"×2", L"×4", L"×8", L"×16"}) {
+                SendMessageW(defaultBpmCorrectionCombo_, CB_ADDSTRING, 0,
+                             reinterpret_cast<LPARAM>(multiplier));
+            }
+            syncSystemSettingsControls();
             bpmEditBrush_ = CreateSolidBrush(RGB(232, 247, 249));
             editor_.setBeforeChangeCallback([this] { recordActiveDocumentHistory(); });
             editor_.setChangedCallback([this] { markActiveDocumentChanged(); });
@@ -343,7 +377,9 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
 
         case WM_CTLCOLOREDIT:
             if (reinterpret_cast<HWND>(lParam) == bpmEdit_ ||
-                reinterpret_cast<HWND>(lParam) == arpeggioIntervalEdit_) {
+                reinterpret_cast<HWND>(lParam) == arpeggioIntervalEdit_ ||
+                reinterpret_cast<HWND>(lParam) == defaultBpmEdit_ ||
+                reinterpret_cast<HWND>(lParam) == defaultArpeggioIntervalEdit_) {
                 const HDC context = reinterpret_cast<HDC>(wParam);
                 SetTextColor(context, kDeepTeal);
                 SetBkColor(context, RGB(232, 247, 249));
@@ -366,9 +402,23 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
                 updateArpeggioIntervalFromControl();
                 return 0;
             }
+            if (LOWORD(wParam) == kDefaultBpmControlId && HIWORD(wParam) == EN_CHANGE) {
+                updateDefaultBpmFromControl();
+                return 0;
+            }
+            if (LOWORD(wParam) == kDefaultArpeggioIntervalControlId &&
+                HIWORD(wParam) == EN_CHANGE) {
+                updateDefaultArpeggioIntervalFromControl();
+                return 0;
+            }
             if (LOWORD(wParam) == kBpmCorrectionControlId &&
                 HIWORD(wParam) == CBN_SELCHANGE) {
                 updateBpmCorrectionFromControl();
+                return 0;
+            }
+            if (LOWORD(wParam) == kDefaultBpmCorrectionControlId &&
+                HIWORD(wParam) == CBN_SELCHANGE) {
+                updateDefaultBpmCorrectionFromControl();
                 return 0;
             }
             if (LOWORD(wParam) == kOutputBackendControlId &&
@@ -698,6 +748,7 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
 
         case WM_DESTROY:
             stopPlayback();
+            saveSystemSettings();
             if (bpmEditBrush_) {
                 DeleteObject(bpmEditBrush_);
                 bpmEditBrush_ = nullptr;
@@ -735,7 +786,8 @@ void MainWindow::destroyFonts() {
 
 void MainWindow::layoutChildren() {
     if (!window_ || !editor_.handle() || !bpmEdit_ || !bpmCorrectionCombo_ ||
-        !arpeggioIntervalEdit_ || !outputBackendCombo_) {
+        !arpeggioIntervalEdit_ || !outputBackendCombo_ || !defaultBpmEdit_ ||
+        !defaultBpmCorrectionCombo_ || !defaultArpeggioIntervalEdit_) {
         return;
     }
     RECT client{};
@@ -765,8 +817,13 @@ void MainWindow::layoutChildren() {
                27, TRUE);
 
     const int settingsCardTop = kSettingsHeaderHeight + 28 - settingsScrollOffset_;
-    MoveWindow(outputBackendCombo_, sidebar + 64, settingsCardTop + 92,
+    const int defaultValuesTop = settingsCardTop + 230;
+    MoveWindow(outputBackendCombo_, sidebar + 64, settingsCardTop + 96,
                std::min(330, std::max(190, contentWidth - 128)), 220, TRUE);
+    const int defaultControlX = std::min(sidebar + 230, static_cast<int>(client.right) - 112);
+    MoveWindow(defaultBpmEdit_, defaultControlX, defaultValuesTop + 84, 92, 27, TRUE);
+    MoveWindow(defaultBpmCorrectionCombo_, defaultControlX, defaultValuesTop + 124, 92, 220, TRUE);
+    MoveWindow(defaultArpeggioIntervalEdit_, defaultControlX, defaultValuesTop + 164, 92, 27, TRUE);
     updatePageVisibility();
 }
 
@@ -1541,51 +1598,94 @@ void MainWindow::paintSettingsPage(HDC context, const RECT& client) {
 
     const int cardLeft = left + 36;
     const int cardRight = std::max(cardLeft + 320, static_cast<int>(client.right) - 38);
-    const int outputTop = kSettingsHeaderHeight + 28 - settingsScrollOffset_;
-    const RECT outputCard{cardLeft, outputTop, cardRight, outputTop + 206};
-    fillRoundedRect(context, outputCard, 18, RGB(248, 252, 254));
-    const RECT outputAccent{outputCard.left, outputCard.top, outputCard.left + 6, outputCard.bottom};
-    fillRoundedRect(context, outputAccent, 6, kLavender);
+    const int systemIoTop = kSettingsHeaderHeight + 28 - settingsScrollOffset_;
+    const RECT systemIoCard{cardLeft, systemIoTop, cardRight, systemIoTop + 206};
+    fillRoundedRect(context, systemIoCard, 18, RGB(248, 252, 254));
+    const RECT systemIoAccent{systemIoCard.left, systemIoCard.top, systemIoCard.left + 6,
+                              systemIoCard.bottom};
+    fillRoundedRect(context, systemIoAccent, 6, kLavender);
 
     SelectObject(context, interfaceFont_);
     SetTextColor(context, kDeepTeal);
-    RECT outputTitle{outputCard.left + 28, outputCard.top + 22,
-                     outputCard.right - 24, outputCard.top + 50};
-    DrawTextW(context, L"输出方式", -1, &outputTitle,
+    RECT systemIoTitle{systemIoCard.left + 28, systemIoCard.top + 20,
+                       systemIoCard.right - 24, systemIoCard.top + 48};
+    DrawTextW(context, L"系统IO", -1, &systemIoTitle,
               DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     SelectObject(context, smallFont_);
     SetTextColor(context, kMuted);
-    RECT outputHelp{outputCard.left + 28, outputCard.top + 50,
-                    outputCard.right - 24, outputCard.top + 82};
+    RECT systemIoHelp{systemIoCard.left + 28, systemIoCard.top + 48,
+                      systemIoCard.right - 24, systemIoCard.top + 76};
     DrawTextW(context, L"选择播放时使用的按键输出后端。切换后对所有乐谱生效。", -1,
-              &outputHelp, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+              &systemIoHelp, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    SelectObject(context, interfaceFont_);
+    SetTextColor(context, kDeepTeal);
+    RECT backendLabel{systemIoCard.left + 28, systemIoCard.top + 91,
+                      systemIoCard.left + 122, systemIoCard.top + 121};
+    DrawTextW(context, L"输出方式", -1, &backendLabel,
+              DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     const wchar_t* backendDescription = outputBackend_ == OutputBackend::WindowsApi
         ? L"Windows API：沿用旧版本的扫描码 SendInput 输出，无需安装驱动。"
         : L"虚拟 HID 驱动：通过 YuanqinVhid 设备提交标准键盘报告，需要安装并启动驱动。";
+    SelectObject(context, smallFont_);
     SetTextColor(context, RGB(73, 116, 132));
-    RECT backendHelp{outputCard.left + 28, outputCard.top + 140,
-                     outputCard.right - 24, outputCard.bottom - 18};
+    RECT backendHelp{systemIoCard.left + 28, systemIoCard.top + 140,
+                     systemIoCard.right - 24, systemIoCard.bottom - 18};
     DrawTextW(context, backendDescription, -1, &backendHelp,
               DT_LEFT | DT_TOP | DT_WORDBREAK | DT_END_ELLIPSIS);
 
-    const int infoTop = outputCard.bottom + 24;
-    const RECT infoCard{cardLeft, infoTop, cardRight, infoTop + 190};
-    fillRoundedRect(context, infoCard, 18, RGB(236, 247, 249));
+    const int defaultValuesTop = systemIoCard.bottom + 24;
+    const RECT defaultValuesCard{cardLeft, defaultValuesTop, cardRight, defaultValuesTop + 230};
+    fillRoundedRect(context, defaultValuesCard, 18, RGB(236, 247, 249));
+    const RECT defaultValuesAccent{defaultValuesCard.left, defaultValuesCard.top,
+                                   defaultValuesCard.left + 6, defaultValuesCard.bottom};
+    fillRoundedRect(context, defaultValuesAccent, 6, RGB(111, 181, 196));
     SelectObject(context, interfaceFont_);
     SetTextColor(context, RGB(54, 103, 121));
-    RECT infoTitle{infoCard.left + 28, infoCard.top + 20,
-                   infoCard.right - 24, infoCard.top + 50};
-    DrawTextW(context, L"输出说明", -1, &infoTitle,
+    RECT defaultValuesTitle{defaultValuesCard.left + 28, defaultValuesCard.top + 20,
+                            defaultValuesCard.right - 24, defaultValuesCard.top + 48};
+    DrawTextW(context, L"默认数值", -1, &defaultValuesTitle,
               DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     SelectObject(context, smallFont_);
     SetTextColor(context, kMuted);
-    RECT infoText{infoCard.left + 28, infoCard.top + 57,
-                  infoCard.right - 28, infoCard.bottom - 22};
-    DrawTextW(context,
-              L"Windows API 与驱动版本共享同一套播放、暂停、跳转和进度逻辑。"
-              L"输出方式只决定最终按键由 SendInput 还是虚拟 HID 设备产生。系统设置页已预留纵向扩展与滚动区域。",
-              -1, &infoText, DT_LEFT | DT_TOP | DT_WORDBREAK);
+    RECT defaultValuesHelp{defaultValuesCard.left + 28, defaultValuesCard.top + 48,
+                           defaultValuesCard.right - 24, defaultValuesCard.top + 74};
+    DrawTextW(context, L"仅在打开文件的瞬间应用，不会影响已打开乐谱。", -1,
+              &defaultValuesHelp, DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+    SelectObject(context, interfaceFont_);
+    SetTextColor(context, kDeepTeal);
+    const int defaultLabelLeft = defaultValuesCard.left + 28;
+    const int defaultLabelRight = defaultValuesCard.left + 178;
+    RECT defaultBpmLabel{defaultLabelLeft, defaultValuesCard.top + 82,
+                          defaultLabelRight, defaultValuesCard.top + 112};
+    RECT defaultCorrectionLabel{defaultLabelLeft, defaultValuesCard.top + 122,
+                                 defaultLabelRight, defaultValuesCard.top + 152};
+    RECT defaultArpeggioLabel{defaultLabelLeft, defaultValuesCard.top + 162,
+                               defaultLabelRight, defaultValuesCard.top + 192};
+    DrawTextW(context, L"BPM", -1, &defaultBpmLabel, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    DrawTextW(context, L"补正", -1, &defaultCorrectionLabel,
+              DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    DrawTextW(context, L"琵琶音间隔（ms）", -1, &defaultArpeggioLabel,
+              DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+    const int shortcutTop = defaultValuesCard.bottom + 24;
+    const RECT shortcutCard{cardLeft, shortcutTop, cardRight, shortcutTop + 132};
+    fillRoundedRect(context, shortcutCard, 18, RGB(248, 252, 254));
+    const RECT shortcutAccent{shortcutCard.left, shortcutCard.top, shortcutCard.left + 6,
+                              shortcutCard.bottom};
+    fillRoundedRect(context, shortcutAccent, 6, RGB(151, 140, 205));
+    SelectObject(context, interfaceFont_);
+    SetTextColor(context, kDeepTeal);
+    RECT shortcutTitle{shortcutCard.left + 28, shortcutCard.top + 22,
+                       shortcutCard.right - 24, shortcutCard.top + 52};
+    DrawTextW(context, L"快捷键设置", -1, &shortcutTitle,
+              DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    SelectObject(context, smallFont_);
+    SetTextColor(context, kMuted);
+    RECT shortcutHelp{shortcutCard.left + 28, shortcutCard.top + 58,
+                      shortcutCard.right - 28, shortcutCard.bottom - 20};
+    DrawTextW(context, L"快捷键自定义将在后续版本提供。", -1, &shortcutHelp,
+              DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     RestoreDC(context, saved);
 
@@ -1629,7 +1729,8 @@ void MainWindow::toggleSidebar() {
 
 void MainWindow::updatePageVisibility() {
     if (!editor_.handle() || !bpmEdit_ || !bpmCorrectionCombo_ || !arpeggioIntervalEdit_ ||
-        !outputBackendCombo_) {
+        !outputBackendCombo_ || !defaultBpmEdit_ || !defaultBpmCorrectionCombo_ ||
+        !defaultArpeggioIntervalEdit_) {
         return;
     }
     const bool workspaceVisible = activePage_ == Page::Workspace || activePage_ == Page::Composition;
@@ -1648,7 +1749,23 @@ void MainWindow::updatePageVisibility() {
     ShowWindow(arpeggioIntervalEdit_, workspaceVisible && tempoPanelExpanded_ &&
                                             controlVisible(tempoLayout.arpeggio.controlBounds)
                                         ? SW_SHOW : SW_HIDE);
-    ShowWindow(outputBackendCombo_, workspaceVisible ? SW_HIDE : SW_SHOW);
+    const RECT settingsViewport = settingsViewportBounds();
+    const int systemIoTop = kSettingsHeaderHeight + 28 - settingsScrollOffset_;
+    const int defaultValuesTop = systemIoTop + 230;
+    const auto settingsControlVisible = [&settingsViewport](int top) {
+        return top >= settingsViewport.top && top + 27 <= settingsViewport.bottom;
+    };
+    const bool settingsVisible = !workspaceVisible;
+    ShowWindow(outputBackendCombo_, settingsVisible && settingsControlVisible(systemIoTop + 96)
+                                       ? SW_SHOW : SW_HIDE);
+    ShowWindow(defaultBpmEdit_, settingsVisible && settingsControlVisible(defaultValuesTop + 84)
+                                     ? SW_SHOW : SW_HIDE);
+    ShowWindow(defaultBpmCorrectionCombo_,
+               settingsVisible && settingsControlVisible(defaultValuesTop + 124)
+                   ? SW_SHOW : SW_HIDE);
+    ShowWindow(defaultArpeggioIntervalEdit_,
+               settingsVisible && settingsControlVisible(defaultValuesTop + 164)
+                   ? SW_SHOW : SW_HIDE);
 }
 
 void MainWindow::syncBpmEditor() {
@@ -1675,8 +1792,102 @@ void MainWindow::syncTempoControls() {
     updatingBpmEdit_ = false;
 }
 
+std::filesystem::path MainWindow::systemSettingsPath() {
+    std::array<wchar_t, 32768> appData{};
+    const DWORD length = GetEnvironmentVariableW(L"APPDATA", appData.data(),
+                                                  static_cast<DWORD>(appData.size()));
+    if (length > 0 && length < appData.size()) {
+        return std::filesystem::path(appData.data()) / L"YuanQin" / L"settings.ini";
+    }
+    return std::filesystem::current_path() / L"yuanqin_settings.ini";
+}
+
+void MainWindow::loadSystemSettings() {
+    const auto path = systemSettingsPath();
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        return;
+    }
+
+    std::string line;
+    while (std::getline(input, line)) {
+        const auto separator = line.find('=');
+        if (separator == std::string::npos) {
+            continue;
+        }
+        const std::string key = line.substr(0, separator);
+        const std::string value = line.substr(separator + 1);
+        if (key == "output_backend") {
+            systemSettings_.outputBackend = value == "virtual_hid"
+                ? OutputBackend::VirtualHid : OutputBackend::WindowsApi;
+            continue;
+        }
+        try {
+            if (key == "default_bpm" && !value.empty()) {
+                std::size_t consumed = 0;
+                const double bpm = std::stod(value, &consumed);
+                if (consumed == value.size() && bpm > 0.0) {
+                    systemSettings_.defaultBpmText = std::wstring(value.begin(), value.end());
+                }
+            } else if (key == "default_correction") {
+                int correction = std::stoi(value);
+                // Older builds offered ×32 by mistake. Preserve the user's intent as ×16.
+                if (correction == 32) {
+                    correction = 16;
+                }
+                if (std::find(kBpmCorrections.begin(), kBpmCorrections.end(), correction) !=
+                    kBpmCorrections.end()) {
+                    systemSettings_.defaultBpmCorrection = correction;
+                }
+            } else if (key == "default_arpeggio_interval_ms") {
+                const int interval = std::stoi(value);
+                if (interval > 0 && interval <= 10000) {
+                    systemSettings_.defaultArpeggioIntervalMs = interval;
+                }
+            }
+        } catch (const std::exception&) {
+            // Keep the built-in default when a hand-edited configuration value is invalid.
+        }
+    }
+}
+
+void MainWindow::saveSystemSettings() const {
+    const auto path = systemSettingsPath();
+    std::error_code error;
+    std::filesystem::create_directories(path.parent_path(), error);
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    if (!output) {
+        return;
+    }
+    output << "output_backend=" << (systemSettings_.outputBackend == OutputBackend::VirtualHid
+                                         ? "virtual_hid" : "windows_api") << '\n';
+    output << "default_bpm=" << std::string(systemSettings_.defaultBpmText.begin(),
+                                               systemSettings_.defaultBpmText.end()) << '\n';
+    output << "default_correction=" << systemSettings_.defaultBpmCorrection << '\n';
+    output << "default_arpeggio_interval_ms=" << systemSettings_.defaultArpeggioIntervalMs << '\n';
+}
+
+void MainWindow::syncSystemSettingsControls() {
+    if (!outputBackendCombo_ || !defaultBpmEdit_ || !defaultBpmCorrectionCombo_ ||
+        !defaultArpeggioIntervalEdit_) {
+        return;
+    }
+    updatingSystemSettingsControls_ = true;
+    SendMessageW(outputBackendCombo_, CB_SETCURSEL,
+                 systemSettings_.outputBackend == OutputBackend::WindowsApi ? 0 : 1, 0);
+    SetWindowTextW(defaultBpmEdit_, systemSettings_.defaultBpmText.c_str());
+    const auto correction = systemSettings_.defaultBpmCorrection;
+    const auto match = std::find(kBpmCorrections.begin(), kBpmCorrections.end(), correction);
+    SendMessageW(defaultBpmCorrectionCombo_, CB_SETCURSEL,
+                 match == kBpmCorrections.end() ? 0 :
+                     static_cast<LRESULT>(std::distance(kBpmCorrections.begin(), match)), 0);
+    SetWindowTextW(defaultArpeggioIntervalEdit_,
+                   std::to_wstring(systemSettings_.defaultArpeggioIntervalMs).c_str());
+    updatingSystemSettingsControls_ = false;
+}
+
 void MainWindow::updateOutputBackendFromControl() {
-    if (!outputBackendCombo_) {
+    if (updatingSystemSettingsControls_ || !outputBackendCombo_) {
         return;
     }
     if (playbackRunning_) {
@@ -1684,10 +1895,52 @@ void MainWindow::updateOutputBackendFromControl() {
     }
     const LRESULT selection = SendMessageW(outputBackendCombo_, CB_GETCURSEL, 0, 0);
     outputBackend_ = selection == 0 ? OutputBackend::WindowsApi : OutputBackend::VirtualHid;
+    systemSettings_.outputBackend = outputBackend_;
+    saveSystemSettings();
     setStatus(outputBackend_ == OutputBackend::WindowsApi
                   ? L"输出方式已切换为 Windows API"
                   : L"输出方式已切换为虚拟 HID 驱动");
     InvalidateRect(window_, nullptr, FALSE);
+}
+
+void MainWindow::updateDefaultBpmFromControl() {
+    if (updatingSystemSettingsControls_ || !defaultBpmEdit_) {
+        return;
+    }
+    wchar_t value[32]{};
+    GetWindowTextW(defaultBpmEdit_, value, static_cast<int>(std::size(value)));
+    wchar_t* end = nullptr;
+    const double bpm = std::wcstod(value, &end);
+    if (end != value && end && *end == L'\0' && bpm > 0.0) {
+        systemSettings_.defaultBpmText = value;
+        saveSystemSettings();
+    }
+}
+
+void MainWindow::updateDefaultBpmCorrectionFromControl() {
+    if (updatingSystemSettingsControls_ || !defaultBpmCorrectionCombo_) {
+        return;
+    }
+    const LRESULT selection = SendMessageW(defaultBpmCorrectionCombo_, CB_GETCURSEL, 0, 0);
+    const std::size_t index = selection >= 0
+        ? std::min<std::size_t>(static_cast<std::size_t>(selection), kBpmCorrections.size() - 1)
+        : 0;
+    systemSettings_.defaultBpmCorrection = kBpmCorrections[index];
+    saveSystemSettings();
+}
+
+void MainWindow::updateDefaultArpeggioIntervalFromControl() {
+    if (updatingSystemSettingsControls_ || !defaultArpeggioIntervalEdit_) {
+        return;
+    }
+    wchar_t value[32]{};
+    GetWindowTextW(defaultArpeggioIntervalEdit_, value, static_cast<int>(std::size(value)));
+    wchar_t* end = nullptr;
+    const long interval = std::wcstol(value, &end, 10);
+    if (end != value && end && *end == L'\0' && interval > 0 && interval <= 10000) {
+        systemSettings_.defaultArpeggioIntervalMs = static_cast<int>(interval);
+        saveSystemSettings();
+    }
 }
 
 void MainWindow::updateBpmCorrectionFromControl() {
@@ -1849,6 +2102,11 @@ void MainWindow::openDocument() {
     const std::string text((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
     DocumentTab tab;
     tab.kind = activePage_ == Page::Composition ? DocumentKind::Composition : DocumentKind::Standard;
+    // System defaults are applied once, at the moment an existing file is opened.
+    // They never overwrite values the user subsequently changes on this tab.
+    tab.bpmText = systemSettings_.defaultBpmText;
+    tab.bpmCorrection = systemSettings_.defaultBpmCorrection;
+    tab.arpeggioIntervalMs = systemSettings_.defaultArpeggioIntervalMs;
     if (tab.kind == DocumentKind::Composition) {
         tab.composition = ui::CompositionDocument::fromText(text);
     } else {

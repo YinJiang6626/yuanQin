@@ -80,6 +80,13 @@ private:
         int contentHeight{};
     };
 
+    struct SystemSettings {
+        OutputBackend outputBackend{OutputBackend::WindowsApi};
+        std::wstring defaultBpmText{L"80"};
+        int defaultBpmCorrection{1};
+        int defaultArpeggioIntervalMs{107};
+    };
+
     static LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wParam,
                                              LPARAM lParam);
     LRESULT handleMessage(UINT message, WPARAM wParam, LPARAM lParam);
@@ -96,6 +103,9 @@ private:
     void syncBpmEditor();
     void syncTempoControls();
     void updateOutputBackendFromControl();
+    void updateDefaultBpmFromControl();
+    void updateDefaultBpmCorrectionFromControl();
+    void updateDefaultArpeggioIntervalFromControl();
     void updateBpmCorrectionFromControl();
     void updateArpeggioIntervalFromControl();
     void recordActiveDocumentHistory();
@@ -105,6 +115,9 @@ private:
     void scrollSettingsBy(int delta);
     void setSettingsScrollFromY(int y);
     void scrollTempoPanelBy(int delta);
+    void loadSystemSettings();
+    void saveSystemSettings() const;
+    void syncSystemSettingsControls();
     void newDocument();
     void openDocument();
     bool saveDocument(std::size_t index);
@@ -171,6 +184,7 @@ private:
     [[nodiscard]] std::optional<std::filesystem::path> chooseExportPath(
         const DocumentTab& document) const;
     [[nodiscard]] std::string serializedDocument(const DocumentTab& document) const;
+    [[nodiscard]] static std::filesystem::path systemSettingsPath();
 
     HWND window_{nullptr};
     HINSTANCE instance_{nullptr};
@@ -178,6 +192,9 @@ private:
     HWND bpmCorrectionCombo_{nullptr};
     HWND arpeggioIntervalEdit_{nullptr};
     HWND outputBackendCombo_{nullptr};
+    HWND defaultBpmEdit_{nullptr};
+    HWND defaultBpmCorrectionCombo_{nullptr};
+    HWND defaultArpeggioIntervalEdit_{nullptr};
     HBRUSH bpmEditBrush_{nullptr};
     ui::ScoreEditor editor_;
     std::vector<DocumentTab> documents_;
@@ -215,6 +232,7 @@ private:
     bool tabAnimating_{false};
     Page activePage_{Page::Workspace};
     OutputBackend outputBackend_{OutputBackend::WindowsApi};
+    SystemSettings systemSettings_{};
     bool insertMode_{false};
     bool sidebarExpanded_{false};
     int settingsScrollOffset_{0};
@@ -227,6 +245,7 @@ private:
     int tempoPanelResizeStartHeight_{0};
     bool updatingBpmEdit_{false};
     bool updatingTempoControls_{false};
+    bool updatingSystemSettingsControls_{false};
 };
 
 }  // namespace yuanqin::app
