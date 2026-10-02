@@ -1,0 +1,9 @@
+E:/projects_in_progress/yuanQin/build-release/CMakeFiles/yuanqin_core.dir
+E:/projects_in_progress/yuanQin/build-release/CMakeFiles/yuanqin_playback.dir
+E:/projects_in_progress/yuanQin/build-release/CMakeFiles/yuanqin_ui_model.dir
+E:/projects_in_progress/yuanQin/build-release/CMakeFiles/yuanqin_ui.dir
+E:/projects_in_progress/yuanQin/build-release/CMakeFiles/yuanqin_keyboard.dir
+E:/projects_in_progress/yuanQin/build-release/CMakeFiles/yuanqin_serial.dir
+E:/projects_in_progress/yuanQin/build-release/CMakeFiles/yuanqin_gui.dir
+E:/projects_in_progress/yuanQin/build-release/CMakeFiles/edit_cache.dir
+E:/projects_in_progress/yuanQin/build-release/CMakeFiles/rebuild_cache.dir

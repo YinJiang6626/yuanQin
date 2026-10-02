@@ -188,7 +188,10 @@ bool MainWindow::create(HINSTANCE instance, int showCommand) {
     windowClass.lpfnWndProc = windowProcedure;
     windowClass.hInstance = instance;
     windowClass.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));
-    windowClass.hIcon = LoadIconW(nullptr, MAKEINTRESOURCEW(32512));
+    windowClass.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(101));
+    if (!windowClass.hIcon) {
+        windowClass.hIcon = LoadIconW(nullptr, MAKEINTRESOURCEW(32512));
+    }
     windowClass.hIconSm = windowClass.hIcon;
     windowClass.lpszClassName = kMainWindowClassName;
     if (!RegisterClassExW(&windowClass) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {

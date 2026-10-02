@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(yuanqin VERSION 0.1.0 LANGUAGES CXX)
+project(yuanqin VERSION 0.1.0 LANGUAGES CXX RC)
 
 option(YUANQIN_BUILD_TESTS "Build parser tests" ON)
 
@@ -59,9 +59,14 @@ target_link_libraries(yuanqin_serial PRIVATE yuanqin_playback)
 add_executable(yuanqin_gui WIN32
     apps/gui/main.cpp
     apps/gui/MainWindow.cpp
+    apps/gui/yuanqin.rc
 )
 target_compile_definitions(yuanqin_gui PRIVATE UNICODE _UNICODE)
 target_link_libraries(yuanqin_gui PRIVATE yuanqin_ui yuanqin_playback comdlg32 msimg32)
+set_target_properties(yuanqin_gui PROPERTIES
+    OUTPUT_NAME "沃来弹"
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_SOURCE_DIR}"
+)
 
 if(YUANQIN_BUILD_TESTS)
     include(CTest)
