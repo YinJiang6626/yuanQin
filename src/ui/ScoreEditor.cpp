@@ -430,7 +430,7 @@ LRESULT ScoreEditor::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
                     return 0;
                 case VK_UP: moveSelection(-static_cast<long long>(kBeatsPerMeasure * kMeasuresPerRow), extendSelection); return 0;
                 case VK_DOWN: moveSelection(kBeatsPerMeasure * kMeasuresPerRow, extendSelection); return 0;
-                case VK_TAB: moveSelection(extendSelection ? -1 : 1, extendSelection); return 0;
+                case VK_TAB: return 0;
                 case VK_HOME:
                     setCaretTick((selectedTick() / kBeatsPerMeasure) * kBeatsPerMeasure,
                                  extendSelection);
@@ -840,6 +840,12 @@ void ScoreEditor::ensureSelectionVisible() {
     }
     RECT client{};
     GetClientRect(window_, &client);
+    // During WM_CREATE the child editor has not been laid out yet and its
+    // client height is zero.  Treating the selected cell as off-screen there
+    // would scroll the first row away before the initial document is shown.
+    if (client.bottom <= 0) {
+        return;
+    }
     const int row = static_cast<int>(selectedMeasure_ / kMeasuresPerRow);
     const int logicalTop = kRowTop + row * rowStride();
     const int logicalBottom = logicalTop + rowHeight();
@@ -1033,8 +1039,9 @@ void ScoreEditor::typeNote(char note) {
         }
     }
     if (!hasSelection() && isGroup && !groupEditing_) {
-        moveSelection(1, false);
-        typeNote(note);
+        // A closed group is an ordinary grid value again.  In insert mode this
+        // shifts the group right; in replace mode it is overwritten in place.
+        replaceSelection({std::string(1, note)}, insertMode_);
         return;
     }
     if (hasSelection() || insertMode_) {
@@ -1063,21 +1070,23 @@ void ScoreEditor::beginGroup(char opening) {
             return;
         }
     }
-    if (!hasSelection() && value.size() >= 2 &&
-        (value.front() == '(' || value.front() == '[') && !groupEditing_) {
-        moveSelection(1, false);
-        beginGroup(opening);
-        return;
+    const std::string group = opening == '(' ? "()" : "[]";
+    const std::size_t start = selectionStartTick();
+    if (hasSelection() || insertMode_) {
+        // Opening a group follows normal insert/replace rules.  The resulting
+        // group remains selected because its text cursor belongs inside it.
+        replaceSelection({group}, insertMode_);
+        setCaretTick(start, false);
+    } else {
+        notifyBeforeChange();
+        document->beginGroup(selectedMeasure_, selectedBeat_, opening);
+        notifyChanged();
     }
-    if (hasSelection()) {
-        replaceSelection({opening == '(' ? "()" : "[]"}, insertMode_);
-        return;
-    }
-    notifyBeforeChange();
-    document->beginGroup(selectedMeasure_, selectedBeat_, opening);
     groupCaretOffset_ = 1;
     groupEditing_ = true;
-    notifyChanged();
+    if (window_) {
+        InvalidateRect(window_, nullptr, FALSE);
+    }
 }
 
 void ScoreEditor::clearSelection() {
@@ -1100,6 +1109,19 @@ void ScoreEditor::deleteSelectionBackward() {
     }
     std::size_t start = selectionStartTick();
     std::size_t count = selectionEndTick() - start + 1;
+    if (!insertMode_) {
+        // Replace mode behaves like overwrite editing: Backspace clears the
+        // current selection and then moves the selection left, without moving
+        // any following notes.
+        notifyBeforeChange();
+        document->clearBeats(start, count);
+        setCaretTick(start == 0 ? 0 : start - 1, false);
+        notifyChanged();
+        return;
+    }
+
+    // Insert mode keeps the original backspace behavior: remove the beat before
+    // a single-cell caret and close the gap by shifting later beats left.
     if (!hasSelection()) {
         if (start == 0) {
             return;

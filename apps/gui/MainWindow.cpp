@@ -208,7 +208,20 @@ bool MainWindow::create(HINSTANCE instance, int showCommand) {
 }
 
 bool MainWindow::processShortcut(const MSG& message) {
-    if (message.message != WM_KEYDOWN || !(GetKeyState(VK_CONTROL) & 0x8000)) {
+    if (message.message != WM_KEYDOWN) {
+        return false;
+    }
+
+    // Tab belongs to the score editor's input mode rather than focus traversal.
+    // Keep it disabled while playback locks the editor.
+    if (message.wParam == VK_TAB && GetFocus() == editor_.handle() &&
+        !playbackRunning_ && !(GetKeyState(VK_CONTROL) & 0x8000) &&
+        !(GetKeyState(VK_MENU) & 0x8000)) {
+        toggleInsertMode();
+        return true;
+    }
+
+    if (!(GetKeyState(VK_CONTROL) & 0x8000)) {
         return false;
     }
 
@@ -1054,11 +1067,14 @@ void MainWindow::paint() {
     }
 
     RECT editModeToggle = editModeToggleBounds();
-    RECT editModeLabel{std::max(0L, editModeToggle.left - 78), editModeToggle.top,
-                       editModeToggle.left - 4, editModeToggle.bottom};
     SelectObject(context, interfaceFont_);
+    constexpr wchar_t kInputModeLabel[] = L"输入模式：";
+    SIZE inputModeLabelSize{};
+    GetTextExtentPoint32W(context, kInputModeLabel, 5, &inputModeLabelSize);
+    RECT editModeLabel{std::max(0L, editModeToggle.left - inputModeLabelSize.cx - 14),
+                       editModeToggle.top, editModeToggle.left - 8, editModeToggle.bottom};
     SetTextColor(context, RGB(214, 242, 245));
-    DrawTextW(context, L"输入模式：", -1, &editModeLabel,
+    DrawTextW(context, kInputModeLabel, -1, &editModeLabel,
               DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
     fillRoundedRect(context, editModeToggle, 9,
                     insertMode_ ? RGB(231, 224, 249) : RGB(220, 244, 245));
