@@ -107,6 +107,7 @@ private:
     std::size_t selectedBeat_{0};
     std::size_t selectionAnchorTick_{0};
     bool mouseSelecting_{false};
+    Hand mouseSelectionHand_{Hand::Right};
     bool insertMode_{false};
     std::size_t groupCaretOffset_{0};
     bool groupEditing_{false};

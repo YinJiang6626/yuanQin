@@ -309,6 +309,7 @@ LRESULT ScoreEditor::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
                 KillTimer(window_, kReturnToPlayheadTimer);
                 selectionAnchorTick_ = selectedTick();
                 if (!playbackActive_) {
+                    mouseSelectionHand_ = activeHand_;
                     mouseSelecting_ = true;
                     SetCapture(window_);
                 }
@@ -332,14 +333,14 @@ LRESULT ScoreEditor::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
 
         case WM_LBUTTONUP:
             if (mouseSelecting_) {
-                mouseSelecting_ = false;
-                ReleaseCapture();
                 POINT point{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
                 if (selectAt(point)) {
                     ensureSelectionVisible();
                     InvalidateRect(window_, nullptr, FALSE);
                     notifySelectionChanged();
                 }
+                mouseSelecting_ = false;
+                ReleaseCapture();
                 return 0;
             }
             break;
@@ -1161,12 +1162,15 @@ void ScoreEditor::deleteSelectionBackward() {
     std::size_t start = selectionStartTick();
     std::size_t count = selectionEndTick() - start + 1;
     if (!insertMode_) {
-        // Replace mode behaves like overwrite editing: Backspace clears the
-        // current selection and then moves the selection left, without moving
-        // any following notes.
+        // Replace mode does not close a gap. Backspace clears the beat before
+        // the selection and places the caret there, leaving later beats fixed.
+        if (start == 0) {
+            return;
+        }
+        --start;
         notifyBeforeChange();
-        document->clearBeats(start, count);
-        setCaretTick(start == 0 ? 0 : start - 1, false);
+        document->clearBeats(start, 1);
+        setCaretTick(start, false);
         notifyChanged();
         return;
     }
@@ -1311,29 +1315,47 @@ void ScoreEditor::pasteClipboard() {
 bool ScoreEditor::selectAt(POINT point, bool toggleGroupEditing) {
     RECT client{};
     GetClientRect(window_, &client);
-    for (const auto& cell : calculateLayout(client.right)) {
-        if (PtInRect(&cell.bounds, point)) {
-            const bool sameCell = activeHand_ == cell.hand &&
-                selectedMeasure_ == cell.measureIndex && selectedBeat_ == cell.beatIndex &&
-                !hasSelection();
-            activeHand_ = cell.hand;
-            selectedMeasure_ = cell.measureIndex;
-            selectedBeat_ = cell.beatIndex;
-            const auto* document = activeDocument();
-            const std::string value = document ? document->beat(selectedMeasure_, selectedBeat_)
-                                               : std::string{};
-            const bool isGroup = value.size() >= 2 &&
-                (value.front() == '(' || value.front() == '[');
-            if (sameCell && toggleGroupEditing && isGroup) {
-                groupEditing_ = !groupEditing_;
-            } else if (!sameCell) {
-                groupEditing_ = isGroup;
-                resetGroupCaret();
-            }
-            return true;
+    const auto cells = calculateLayout(client.right);
+    const auto hovered = std::find_if(cells.begin(), cells.end(), [point](const CellLayout& cell) {
+        return PtInRect(&cell.bounds, point);
+    });
+    if (hovered == cells.end()) {
+        return false;
+    }
+
+    auto selected = hovered;
+    if (mouseSelecting_ && isComposition()) {
+        // Keep the hand where the drag began, but retain the big-row and beat that
+        // the pointer currently occupies.  Crossing into the next big row therefore
+        // continues on its matching R/L small row rather than snapping back to the
+        // original row.
+        selected = std::find_if(cells.begin(), cells.end(), [this, &hovered](const CellLayout& cell) {
+            return cell.hand == mouseSelectionHand_ &&
+                   cell.measureIndex == hovered->measureIndex &&
+                   cell.beatIndex == hovered->beatIndex;
+        });
+        if (selected == cells.end()) {
+            return false;
         }
     }
-    return false;
+
+    const CellLayout& cell = *selected;
+    const bool sameCell = activeHand_ == cell.hand &&
+        selectedMeasure_ == cell.measureIndex && selectedBeat_ == cell.beatIndex && !hasSelection();
+    activeHand_ = cell.hand;
+    selectedMeasure_ = cell.measureIndex;
+    selectedBeat_ = cell.beatIndex;
+    const auto* document = activeDocument();
+    const std::string value = document ? document->beat(selectedMeasure_, selectedBeat_)
+                                       : std::string{};
+    const bool isGroup = value.size() >= 2 && (value.front() == '(' || value.front() == '[');
+    if (sameCell && toggleGroupEditing && isGroup) {
+        groupEditing_ = !groupEditing_;
+    } else if (!sameCell) {
+        groupEditing_ = isGroup;
+        resetGroupCaret();
+    }
+    return true;
 }
 
 }  // namespace yuanqin::ui
