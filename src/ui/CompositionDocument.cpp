@@ -40,17 +40,120 @@ std::string measureText(const ScoreDocument& source, std::size_t measureIndex) {
     return result;
 }
 
+bool isPipa(const std::string& value) {
+    return value.size() >= 2 && value.front() == '[' && value.back() == ']';
+}
+
+std::string playableNotes(std::string_view value) {
+    std::string notes;
+    for (const char note : value) {
+        if (core::ScoreParser::isPlayableNote(note)) notes.push_back(note);
+    }
+    return notes;
+}
+
+std::vector<std::string> pipaSteps(const std::string& value) {
+    std::vector<std::string> result;
+    if (!isPipa(value)) {
+        return result;
+    }
+
+    for (std::size_t index = 1; index + 1 < value.size();) {
+        if (core::ScoreParser::isPlayableNote(value[index])) {
+            result.emplace_back(1, value[index++]);
+            continue;
+        }
+        if (value[index] == '(') {
+            const std::size_t start = ++index;
+            int depth = 1;
+            while (index + 1 < value.size() && depth > 0) {
+                if (value[index] == '(') {
+                    ++depth;
+                } else if (value[index] == ')') {
+                    --depth;
+                }
+                ++index;
+            }
+            const std::size_t end = depth == 0 ? index - 1 : index;
+            const std::string notes = playableNotes(
+                std::string_view(value).substr(start, end - start));
+            if (!notes.empty()) {
+                result.push_back("(" + notes + ")");
+            }
+            continue;
+        }
+        ++index;
+    }
+    return result;
+}
+
+std::string combineEvents(const std::string& first, const std::string& second) {
+    if (first.empty()) return second;
+    if (second.empty()) return first;
+    std::string notes;
+    for (const char note : playableNotes(first) + playableNotes(second)) {
+        // A simultaneous note only needs one key press. Keep the first hand's
+        // order while removing repeated notes from both ordinary and pipa merges.
+        if (notes.find(note) == std::string::npos) {
+            notes.push_back(note);
+        }
+    }
+    if (notes.empty()) {
+        return {};
+    }
+    return notes.size() == 1 ? notes : "(" + notes + ")";
+}
+
+std::string makePipa(const std::vector<std::string>& steps) {
+    std::string result{"["};
+    for (const auto& step : steps) {
+        result += step;
+    }
+    result += ']';
+    return result;
+}
+
+std::string mergePipaAndBeat(const std::string& pipa, const std::string& beat,
+                              bool pipaComesFirst) {
+    auto steps = pipaSteps(pipa);
+    if (steps.empty()) {
+        const std::string notes = playableNotes(beat);
+        if (!notes.empty()) {
+            steps.push_back(notes.size() == 1 ? notes : "(" + notes + ")");
+        }
+        return makePipa(steps);
+    }
+    steps.front() = pipaComesFirst ? combineEvents(steps.front(), beat)
+                                   : combineEvents(beat, steps.front());
+    return makePipa(steps);
+}
+
+std::string mergePipas(const std::string& right, const std::string& left) {
+    const auto rightSteps = pipaSteps(right);
+    const auto leftSteps = pipaSteps(left);
+    std::vector<std::string> merged;
+    merged.reserve(std::max(rightSteps.size(), leftSteps.size()));
+    for (std::size_t index = 0; index < std::max(rightSteps.size(), leftSteps.size()); ++index) {
+        const std::string rightStep = index < rightSteps.size() ? rightSteps[index] : std::string{};
+        const std::string leftStep = index < leftSteps.size() ? leftSteps[index] : std::string{};
+        merged.push_back(combineEvents(rightStep, leftStep));
+    }
+    return makePipa(merged);
+}
+
 std::string combinedBeat(const std::string& right, const std::string& left) {
     if (right.empty()) return left;
     if (left.empty()) return right;
-    std::string notes;
-    for (const char note : right) {
-        if (core::ScoreParser::isPlayableNote(note)) notes.push_back(note);
+    if (isPipa(right) && isPipa(left)) {
+        return mergePipas(right, left);
     }
-    for (const char note : left) {
-        if (core::ScoreParser::isPlayableNote(note)) notes.push_back(note);
+    if (isPipa(right)) {
+        return mergePipaAndBeat(right, left, true);
     }
-    return notes.empty() ? std::string{} : "(" + notes + ")";
+    if (isPipa(left)) {
+        return mergePipaAndBeat(left, right, false);
+    }
+    return combineEvents(right, left);
 }
 
 }  // namespace

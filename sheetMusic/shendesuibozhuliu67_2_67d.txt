@@ -1,0 +1,9 @@
+    /(GB)   /(HN)   /(AQ)   /
+(SW) (AN)(SW)/(AQZ) (AN)(AQ)/(SW) (DESGM) /(DEX) (SGM) /
+(SW) (BM)(SW)/(AQ) (BM)(AQ)/(SW) (DENA) /(DEC) (NAD) /
+(SW) (AN)(SW)/(AQZ) (AN)(AQ)/(SW) (DESGM) /(DEX) (DESGM) /
+(GTZ) [(DEBA)RE] /W (QBAD) /(EZ) (BAD) /E (BAD) /
+(SWV) (AN)(SW)/(AQZ) (AN)(AQ)/(SW) (DESGM) /(DEX) (SGM) /
+(SWC) (BM)(SW)/(AQ) (BM)(AQ)/(SW) (DENA) /(DEC) (NAD) /
+(SW) (AN)(SW)/(AQZ) (AN)(AQ)/(SW) (DESGM) /(DEX) (DESGM) /
+(SWZ) (DEBA)(SW)/(AQ) (BAD) /(AQZ) (BAD) /B (BAD) /

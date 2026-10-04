@@ -28,7 +28,21 @@ int main() {
     require(merged.beat(0, 0) == "Q", "a solo right-hand beat stays playable");
     require(merged.beat(0, 1) == "Z", "a solo left-hand beat stays playable");
     require(merged.beat(0, 2).empty(), "matching rests remain rests");
-    require(merged.beat(0, 3) == "(ASW)", "simultaneous hands merge into one chord");
+    require(merged.beat(0, 3) == "[(AW)S]",
+            "a note paired with a pipa arpeggio joins its first arpeggio step");
+
+    const auto pairedPipas = CompositionDocument::fromText(
+        "R([ASDF]/)\nL([QW(ER)]/)\n");
+    require(pairedPipas.mergedScore().beat(0, 0) == "[(AQ)(SW)(DER)F]",
+            "two pipa arpeggios merge step by step in order");
+
+    const auto duplicateNotes = CompositionDocument::fromText(
+        "R(A[AS]/)\nL(A[AQ]/)\n");
+    const auto duplicateMerged = duplicateNotes.mergedScore();
+    require(duplicateMerged.beat(0, 0) == "A",
+            "ordinary simultaneous notes are deduplicated");
+    require(duplicateMerged.beat(0, 1) == "[A(SQ)]",
+            "matching pipa steps are deduplicated while preserving order");
 
     std::cout << "Composition document tests passed.\n";
 }

@@ -576,6 +576,14 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
                 playFromBeginning();
                 return 0;
             }
+            RECT opacity = opacityBounds();
+            InflateRect(&opacity, 0, 12);
+            if (PtInRect(&opacity, point)) {
+                draggingOpacity_ = true;
+                setWindowOpacityFromX(point.x);
+                SetCapture(window_);
+                return 0;
+            }
             const RECT progress = progressBounds();
             RECT progressHit = progress;
             InflateRect(&progressHit, 0, 12);
@@ -855,9 +863,10 @@ RECT MainWindow::opacityBounds() const {
     RECT client{};
     GetClientRect(window_, &client);
     client.right = std::max<LONG>(0, client.right - sidebarWidth());
-    const LONG footerTop = client.bottom - kFooterHeight;
-    return {std::max(430L, client.right - 170), footerTop + 13,
-            client.right - 28, footerTop + 19};
+    // Keep opacity beside the fixed input-mode control instead of consuming
+    // space in the transport footer.
+    return {std::max(180L, client.right - 360), 83,
+            std::max(181L, client.right - 238), 89};
 }
 
 RECT MainWindow::headerDragBounds() const {
@@ -1048,14 +1057,17 @@ bool MainWindow::shouldHandleWithoutActivation(POINT clientPoint) const {
     RECT playPause = playPauseBounds();
     RECT fromBeginning = playFromBeginningBounds();
     RECT progress = progressBounds();
+    RECT opacity = opacityBounds();
     RECT tempoPanel = tempoPanelBounds();
     RECT tempoResize = tempoPanelResizeBounds();
     const RECT headerDrag = headerDragBounds();
     RECT editModeToggle = editModeToggleBounds();
     InflateRect(&progress, 0, 12);
+    InflateRect(&opacity, 0, 12);
     if (PtInRect(&headerDrag, workspacePoint) || PtInRect(&playPause, workspacePoint) ||
         PtInRect(&fromBeginning, workspacePoint) ||
-        PtInRect(&progress, workspacePoint) || PtInRect(&tempoPanel, workspacePoint) ||
+        PtInRect(&progress, workspacePoint) || PtInRect(&opacity, workspacePoint) ||
+        PtInRect(&tempoPanel, workspacePoint) ||
         PtInRect(&tempoResize, workspacePoint) ||
         PtInRect(&editModeToggle, workspacePoint)) {
         return true;
@@ -1310,6 +1322,33 @@ void MainWindow::paint() {
     SetTextColor(context, insertMode_ ? RGB(83, 71, 139) : kDeepTeal);
     DrawTextW(context, insertMode_ ? L"插入" : L"替换", -1, &editModeToggle,
               DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+    const RECT opacity = opacityBounds();
+    SelectObject(context, smallFont_);
+    SetTextColor(context, RGB(214, 242, 245));
+    RECT opacityLabel{std::max(0L, opacity.left - 62), opacity.top - 9,
+                      opacity.left - 8, opacity.bottom + 9};
+    DrawTextW(context, L"透明度", -1, &opacityLabel,
+              DT_RIGHT | DT_VCENTER | DT_SINGLELINE);
+    fillRoundedRect(context, opacity, 6, RGB(62, 125, 144));
+    const double opacityRatio = std::clamp(
+        static_cast<double>(windowOpacityPercent_ - 25) / 75.0, 0.0, 1.0);
+    RECT opacityFill = opacity;
+    opacityFill.right = opacity.left + static_cast<LONG>(std::lround(
+        static_cast<double>(opacity.right - opacity.left) * opacityRatio));
+    if (opacityFill.right > opacityFill.left) {
+        fillRoundedRect(context, opacityFill, 6, RGB(133, 220, 223));
+    }
+    const int opacityHandleX = opacity.left + static_cast<int>(std::lround(
+        static_cast<double>(opacity.right - opacity.left) * opacityRatio));
+    const HBRUSH opacityHandleBrush = CreateSolidBrush(RGB(231, 224, 249));
+    const auto oldOpacityHandleBrush = SelectObject(context, opacityHandleBrush);
+    const auto oldOpacityHandlePen = SelectObject(context, GetStockObject(NULL_PEN));
+    Ellipse(context, opacityHandleX - 6, opacity.top - 5,
+            opacityHandleX + 6, opacity.bottom + 5);
+    SelectObject(context, oldOpacityHandlePen);
+    SelectObject(context, oldOpacityHandleBrush);
+    DeleteObject(opacityHandleBrush);
 
     for (const auto& item : tabItems()) {
         const bool active = item.index == activeDocument_;
@@ -2567,14 +2606,23 @@ void MainWindow::restorePlaybackSelection() {
         return;
     }
 
-    const std::size_t playbackTick = transportTick_;
+    const bool playbackFinished = transportTotalTicks_ > 0 &&
+        transportTick_ >= transportTotalTicks_;
+    const std::size_t selectionTick = transportTotalTicks_ == 0
+        ? 0
+        : std::min(transportTick_, transportTotalTicks_ - 1);
     auto& tab = documents_[activeDocument_];
+    // The paired composition highlight is only used while playing.  On pause,
+    // return to the hand where playback began, but keep its selection at the
+    // exact beat where playback stopped instead of jumping back to the start.
     tab.activeHand = playbackSelectionHand_;
-    tab.selectionAnchor = playbackSelectionAnchor_;
-    tab.selectionCaret = playbackSelectionCaret_;
+    tab.selectionAnchor = selectionTick;
+    tab.selectionCaret = selectionTick;
     editor_.setActiveHand(playbackSelectionHand_);
-    editor_.setSelectionRange(playbackSelectionAnchor_, playbackSelectionCaret_);
-    transportTick_ = playbackTick;
+    editor_.setSelectionRange(selectionTick, selectionTick);
+    // Retain the end sentinel after a completed composition so the ordinary
+    // play button follows the same restart-from-zero rule as editor mode.
+    transportTick_ = playbackFinished ? transportTotalTicks_ : selectionTick;
 }
 
 void MainWindow::togglePlayback() {

@@ -1230,7 +1230,13 @@ void ScoreEditor::cutSelectionToClipboard() {
     const std::size_t start = selectionStartTick();
     const std::size_t count = selectionEndTick() - start + 1;
     notifyBeforeChange();
-    document->eraseBeats(start, count);
+    if (insertMode_) {
+        document->eraseBeats(start, count);
+    } else {
+        // In replace mode Cut leaves the score grid in place; it only clears
+        // the copied cells instead of pulling later cells to the left.
+        document->clearBeats(start, count);
+    }
     setCaretTick(start, false);
     notifyChanged();
 }
@@ -1309,7 +1315,22 @@ void ScoreEditor::pasteClipboard() {
     if (values.empty()) {
         return;
     }
-    replaceSelection(values, insertMode_);
+    if (insertMode_) {
+        replaceSelection(values, true);
+        return;
+    }
+
+    // Replace-mode paste overwrites consecutive cells from the selection start.
+    // It deliberately does not erase/insert the selected range, so later cells
+    // never shift and any unpasted selected cells remain untouched.
+    auto* document = activeDocument();
+    const std::size_t start = selectionStartTick();
+    notifyBeforeChange();
+    for (std::size_t index = 0; index < values.size(); ++index) {
+        document->setBeatAt(start + index, values[index]);
+    }
+    setCaretTick(start + values.size(), false);
+    notifyChanged();
 }
 
 bool ScoreEditor::selectAt(POINT point, bool toggleGroupEditing) {
