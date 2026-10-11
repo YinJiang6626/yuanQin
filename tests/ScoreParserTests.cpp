@@ -61,6 +61,21 @@ int main() {
                 !pipaMeasure.score.ticks()[3],
             "spaces after pipa are rests");
 
+    const auto held = ScoreParser::parseText("{W-}{(ASD)---}  /");
+    require(held.success, "long-hold notation parses successfully");
+    require(held.score.ticks()[0]->style == PlayStyle::Hold,
+            "braces make a long-hold event");
+    require(held.score.ticks()[0]->notes == std::vector<char>({'W'}) &&
+                held.score.ticks()[0]->holdTicks == 2,
+            "one dash extends a held note to two minimum units");
+    require(held.score.ticks()[1]->notes == std::vector<char>({'A', 'S', 'D'}) &&
+                held.score.ticks()[1]->holdTicks == 4,
+            "a held chord and its duration are retained");
+
+    const auto endingHold = ScoreParser::parseText("ABC{W---}/");
+    require(endingHold.score.tickCount() == 4 && endingHold.score.playbackTickCount() == 7,
+            "a final long hold extends the score timeline through its release tick");
+
     const auto invalidNote = ScoreParser::parseText("K/");
     require(!invalidNote.diagnostics.empty(), "unsupported letter reports a diagnostic");
     require(!invalidNote.score.ticks()[0], "unsupported letter is not played");

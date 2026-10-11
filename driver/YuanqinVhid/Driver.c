@@ -68,6 +68,32 @@ static NTSTATUS YuanqinReleaseAll(_In_ PYUANQIN_DEVICE_CONTEXT DeviceContext)
 {
     YUANQIN_KEYBOARD_REPORT report;
     RtlZeroMemory(&report, sizeof(report));
+    RtlZeroMemory(DeviceContext->PressedKeys, sizeof(DeviceContext->PressedKeys));
+    DeviceContext->PressedKeyCount = 0;
+    return YuanqinSubmitReport(DeviceContext, &report);
+}
+
+static NTSTATUS YuanqinSetPressedKeys(
+    _In_ PYUANQIN_DEVICE_CONTEXT DeviceContext,
+    _In_ const PYUANQIN_VHID_COMMAND Command
+)
+{
+    YUANQIN_KEYBOARD_REPORT report;
+    UCHAR index;
+
+    if (Command->KeyCount > YUANQIN_VHID_MAX_KEYS) {
+        return STATUS_INVALID_PARAMETER;
+    }
+    RtlZeroMemory(&report, sizeof(report));
+    report.Modifier = Command->Modifier;
+    for (index = 0; index < Command->KeyCount; ++index) {
+        if (Command->Keys[index] < 0x04 || Command->Keys[index] > 0x1D) {
+            return STATUS_INVALID_PARAMETER;
+        }
+        report.Keys[index] = Command->Keys[index];
+    }
+    RtlCopyMemory(DeviceContext->PressedKeys, report.Keys, sizeof(report.Keys));
+    DeviceContext->PressedKeyCount = Command->KeyCount;
     return YuanqinSubmitReport(DeviceContext, &report);
 }
 
@@ -112,6 +138,8 @@ NTSTATUS YuanqinEvtDeviceAdd(
 
     deviceContext = YuanqinGetDeviceContext(device);
     deviceContext->VhfHandle = NULL;
+    RtlZeroMemory(deviceContext->PressedKeys, sizeof(deviceContext->PressedKeys));
+    deviceContext->PressedKeyCount = 0;
 
     status = WdfDeviceCreateDeviceInterface(
         device, &GUID_DEVINTERFACE_YUANQIN_VHID, NULL);
@@ -208,6 +236,10 @@ VOID YuanqinEvtIoDeviceControl(
 
         case YuanqinVhidCommandReleaseAll:
             status = YuanqinReleaseAll(deviceContext);
+            break;
+
+        case YuanqinVhidCommandSetPressedKeys:
+            status = YuanqinSetPressedKeys(deviceContext, command);
             break;
 
         case YuanqinVhidCommandTap: {

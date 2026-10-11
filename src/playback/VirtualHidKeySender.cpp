@@ -73,7 +73,7 @@ VirtualHidKeySender::~VirtualHidKeySender() {
 
 VirtualHidKeySender::VirtualHidKeySender(VirtualHidKeySender&& other) noexcept
     : handle_(other.handle_), lastError_(other.lastError_),
-      holdMilliseconds_(other.holdMilliseconds_) {
+      holdMilliseconds_(other.holdMilliseconds_), heldUsages_(std::move(other.heldUsages_)) {
     other.handle_ = INVALID_HANDLE_VALUE;
 }
 
@@ -84,6 +84,7 @@ VirtualHidKeySender& VirtualHidKeySender::operator=(VirtualHidKeySender&& other)
         handle_ = other.handle_;
         lastError_ = other.lastError_;
         holdMilliseconds_ = other.holdMilliseconds_;
+        heldUsages_ = std::move(other.heldUsages_);
         other.handle_ = INVALID_HANDLE_VALUE;
     }
     return *this;
@@ -98,8 +99,7 @@ DWORD VirtualHidKeySender::lastError() const noexcept {
 }
 
 bool VirtualHidKeySender::sendKey(char note) {
-    const unsigned char usage = noteToHidUsage(note);
-    return usage != 0 && sendCommand(YuanqinVhidCommandTap, {&usage, 1});
+    return sendChord({&note, 1});
 }
 
 bool VirtualHidKeySender::sendChord(std::span<const char> notes) {
@@ -121,13 +121,78 @@ bool VirtualHidKeySender::sendChord(std::span<const char> notes) {
             usages[count++] = usage;
         }
     }
-    return count != 0 && sendCommand(YuanqinVhidCommandTap, {usages.data(), count});
+    return count != 0 && sendPressedReport({usages.data(), count});
+}
+
+bool VirtualHidKeySender::pressChord(std::span<const char> notes) {
+    for (const char note : notes) {
+        const unsigned char usage = noteToHidUsage(note);
+        if (usage == 0) {
+            lastError_ = ERROR_INVALID_PARAMETER;
+            return false;
+        }
+        if (std::find(heldUsages_.begin(), heldUsages_.end(), usage) == heldUsages_.end()) {
+            heldUsages_.push_back(usage);
+        }
+    }
+    return heldUsages_.size() <= YUANQIN_VHID_MAX_KEYS &&
+        sendPressedReport({});
+}
+
+bool VirtualHidKeySender::releaseChord(std::span<const char> notes) {
+    for (const char note : notes) {
+        const unsigned char usage = noteToHidUsage(note);
+        if (usage == 0) {
+            lastError_ = ERROR_INVALID_PARAMETER;
+            return false;
+        }
+        heldUsages_.erase(std::remove(heldUsages_.begin(), heldUsages_.end(), usage),
+                          heldUsages_.end());
+    }
+    return sendPressedReport({});
 }
 
 void VirtualHidKeySender::releaseAll() noexcept {
+    heldUsages_.clear();
     if (isOpen()) {
         sendCommand(YuanqinVhidCommandReleaseAll, {});
     }
+}
+
+bool VirtualHidKeySender::sendPressedReport(std::span<const unsigned char> transientUsages) noexcept {
+    std::array<unsigned char, YUANQIN_VHID_MAX_KEYS> combined{};
+    std::size_t count = 0;
+    const auto append = [&combined, &count](unsigned char usage) {
+        if (std::find(combined.begin(), combined.begin() + static_cast<std::ptrdiff_t>(count), usage) ==
+            combined.begin() + static_cast<std::ptrdiff_t>(count)) {
+            if (count >= combined.size()) {
+                return false;
+            }
+            combined[count++] = usage;
+        }
+        return true;
+    };
+    for (const unsigned char usage : heldUsages_) {
+        if (!append(usage)) {
+            lastError_ = ERROR_INVALID_PARAMETER;
+            return false;
+        }
+    }
+    for (const unsigned char usage : transientUsages) {
+        if (!append(usage)) {
+            lastError_ = ERROR_INVALID_PARAMETER;
+            return false;
+        }
+    }
+    if (!sendCommand(YuanqinVhidCommandSetPressedKeys, {combined.data(), count})) {
+        return false;
+    }
+    if (transientUsages.empty()) {
+        return true;
+    }
+    Sleep(holdMilliseconds_);
+    return sendCommand(YuanqinVhidCommandSetPressedKeys,
+                       std::span<const unsigned char>(heldUsages_.data(), heldUsages_.size()));
 }
 
 bool VirtualHidKeySender::sendCommand(unsigned char command,

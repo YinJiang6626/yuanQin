@@ -19,6 +19,48 @@ bool Win32KeySender::sendKey(char note) {
     return true;
 }
 
+bool Win32KeySender::sendKeyState(char note, bool keyUp) {
+    if (targetWindow_ && GetForegroundWindow() != targetWindow_ &&
+        !GenshinWindowTarget::activate(targetWindow_, nullptr)) {
+        return false;
+    }
+    INPUT input{};
+    input.type = INPUT_KEYBOARD;
+    input.ki.wVk = VkKeyScanA(note);
+    if (input.ki.wVk == 0xFFFF) {
+        return false;
+    }
+    input.ki.dwFlags = keyUp ? KEYEVENTF_KEYUP : 0;
+    return SendInput(1, &input, sizeof(input)) == 1;
+}
+
+bool Win32KeySender::pressChord(std::span<const char> notes) {
+    for (const char note : notes) {
+        if (!sendKeyState(note, false)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool Win32KeySender::releaseChord(std::span<const char> notes) {
+    for (const char note : notes) {
+        if (!sendKeyState(note, true)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void Win32KeySender::releaseAll() noexcept {
+    constexpr char notes[] = "QWERTYUASDFGHJZXCVBNM";
+    for (const char note : notes) {
+        if (note != '\0') {
+            (void)sendKeyState(note, true);
+        }
+    }
+}
+
 void Win32KeySender::push_keybd(char data) {
     INPUT input;
     input.type = INPUT_KEYBOARD;

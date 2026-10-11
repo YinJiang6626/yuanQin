@@ -64,6 +64,44 @@ struct ParsedArpeggio {
     std::vector<std::vector<char>> steps;
 };
 
+struct ParsedHold {
+    std::vector<char> notes;
+    std::size_t ticks{1};
+};
+
+ParsedHold parseHold(std::string_view source, std::size_t& index,
+                     std::size_t sourceOffset, ParseResult& result) {
+    ParsedHold hold;
+    const std::size_t groupStart = index - 1;
+
+    if (index < source.size() && source[index] == '(') {
+        ++index;
+        hold.notes = parseGroup(source, index, ')', sourceOffset, result);
+    } else if (index < source.size() && ScoreParser::isPlayableNote(source[index])) {
+        hold.notes.push_back(normalizeNote(source[index++]));
+    } else if (index < source.size() && std::isalpha(static_cast<unsigned char>(source[index]))) {
+        addDiagnostic(result, sourceOffset + index,
+                      "此字符不是原神竖琴的有效按键，已忽略。");
+        ++index;
+    }
+
+    while (index < source.size() && source[index] == '-') {
+        ++hold.ticks;
+        ++index;
+    }
+
+    if (index >= source.size() || source[index] != '}') {
+        addDiagnostic(result, sourceOffset + groupStart, "长按音符组缺少结束符或包含无效内容。");
+        while (index < source.size() && source[index] != '}') {
+            ++index;
+        }
+    }
+    if (index < source.size() && source[index] == '}') {
+        ++index;
+    }
+    return hold;
+}
+
 ParsedArpeggio parseArpeggio(std::string_view source, std::size_t& index,
                              std::size_t sourceOffset, ParseResult& result) {
     ParsedArpeggio arpeggio;
@@ -150,7 +188,23 @@ void parseMeasure(std::string_view source, std::size_t sourceOffset, ParseResult
             continue;
         }
 
-        if (value == ')' || value == ']') {
+        if (value == '{') {
+            auto hold = parseHold(source, index, sourceOffset, result);
+            if (hold.notes.empty()) {
+                if (tick < kTicksPerMeasure) {
+                    ++tick;
+                }
+                addDiagnostic(result, sourceOffset + index - 1,
+                              "空长按音符组会被当作休止符。");
+                continue;
+            }
+            addEvent(measure, tick,
+                     {PlayStyle::Hold, std::move(hold.notes), {}, hold.ticks},
+                     result, sourceOffset + index - 1);
+            continue;
+        }
+
+        if (value == ')' || value == ']' || value == '}') {
             addDiagnostic(result, sourceOffset + index - 1, "发现未匹配的音符组结束符，已忽略。");
             continue;
         }

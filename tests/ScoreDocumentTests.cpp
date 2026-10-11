@@ -65,6 +65,17 @@ int main() {
     require(typedNested.beat(0, 0) == "[(AS)]",
             "nested pipa chord typing preserves its delimiters");
 
+    const auto loadedHold = ScoreDocument::fromText("{(as)--}Q  /");
+    require(loadedHold.beat(0, 0) == "{(AS)--}" && loadedHold.toText() == "{(AS)--}Q  /",
+            "the editor preserves long-hold notation while loading and saving");
+    ScoreDocument typedHold;
+    typedHold.beginGroup(0, 0, '{');
+    std::size_t holdCaret = 1;
+    require(typedHold.insertGroupNote(0, 0, holdCaret, 'w') &&
+                typedHold.insertHoldDash(0, 0, holdCaret) &&
+                typedHold.beat(0, 0) == "{W-}",
+            "a long hold can be created as an editable cell");
+
     ScoreDocument groupBackspace;
     groupBackspace.beginGroup(0, 0, '(');
     std::size_t groupCaret = 1;

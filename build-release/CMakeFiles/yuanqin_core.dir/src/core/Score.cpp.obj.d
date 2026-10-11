@@ -77,5 +77,27 @@ CMakeFiles/yuanqin_core.dir/src/core/Score.cpp.obj: \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/ranges_base.h \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/max_size_type.h \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/numbers \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/algorithm \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/stl_algo.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/algorithmfwd.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/stl_heap.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/uniform_int_dist.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/stl_tempbuf.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/cstdlib \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/x86_64-w64-mingw32/include/stdlib.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/x86_64-w64-mingw32/include/corecrt_wstdlib.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/lib/gcc/x86_64-w64-mingw32/14.2.0/include/limits.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/lib/gcc/x86_64-w64-mingw32/14.2.0/include/syslimits.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/x86_64-w64-mingw32/include/limits.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/x86_64-w64-mingw32/include/sec_api/stdlib_s.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/stdlib.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/x86_64-w64-mingw32/include/malloc.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/lib/gcc/x86_64-w64-mingw32/14.2.0/include/mm_malloc.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/x86_64-w64-mingw32/include/errno.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/std_abs.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/ranges_algo.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/ranges_algobase.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/pstl/glue_algorithm_defs.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/pstl/execution_defs.h \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/utility \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/stl_relops.h

@@ -22,12 +22,24 @@ public:
         return true;
     }
 
+    bool pressChord(std::span<const char> chord) override {
+        pressed.emplace_back(chord.begin(), chord.end());
+        return true;
+    }
+
+    bool releaseChord(std::span<const char> chord) override {
+        released.emplace_back(chord.begin(), chord.end());
+        return true;
+    }
+
     void releaseAll() noexcept override {
         ++releaseCount;
     }
 
     std::vector<char> notes;
     std::vector<std::vector<char>> chords;
+    std::vector<std::vector<char>> pressed;
+    std::vector<std::vector<char>> released;
     int releaseCount{};
 };
 
@@ -98,6 +110,30 @@ int main() {
             "fixed-rate arpeggio playback completes");
     require(fixedRatePipaSender.notes == std::vector<char>({'A', 'S', 'D'}),
             "a 6 ms pipa span skips the following three 2 ms score units");
+
+    RecordingSender holdSender;
+    const auto holdScore = ScoreParser::parseText("{A-}S  /").score;
+    options.bpm = 1.0e9;
+    options.arpeggioStepInterval = 0ms;
+    const auto holdResult = player.play(holdScore, holdSender, options);
+    require(holdResult.status == PlaybackStatus::Completed,
+            "long-hold playback completes");
+    require(holdSender.pressed == std::vector<std::vector<char>>{{'A'}} &&
+                holdSender.released == std::vector<std::vector<char>>{{'A'}},
+            "a long hold emits separate key-down and key-up operations");
+    require(holdSender.notes == std::vector<char>({'S'}),
+            "later score units still play while an earlier note is held");
+
+    RecordingSender endingHoldSender;
+    std::vector<std::size_t> endingHoldProgress;
+    const auto endingHoldScore = ScoreParser::parseText("ABC{W---}/").score;
+    const auto endingHoldResult = player.play(
+        endingHoldScore, endingHoldSender, options, {},
+        [&endingHoldProgress](std::size_t tick) { endingHoldProgress.push_back(tick); });
+    require(endingHoldResult.status == PlaybackStatus::Completed && endingHoldResult.tickIndex == 7,
+            "playback completes on the final long-hold release tick");
+    require(endingHoldProgress == std::vector<std::size_t>({0, 1, 2, 3, 4, 5, 6}),
+            "the playhead continues through every trailing long-hold unit");
 
     RecordingSender cancelledSender;
     const auto cancelled = player.play(score, cancelledSender, options, [] { return true; });

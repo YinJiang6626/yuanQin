@@ -3,7 +3,7 @@
 // This header is shared by the Win32 client and the KMDF driver. Include
 // Windows.h in user mode, or ntddk.h/wdf.h in kernel mode, before this file.
 
-#define YUANQIN_VHID_PROTOCOL_VERSION 1UL
+#define YUANQIN_VHID_PROTOCOL_VERSION 2UL
 #define YUANQIN_VHID_MAX_KEYS 6U
 
 // {3A3ACB6A-8DA4-4628-BEA4-211A89D2416C}
@@ -16,7 +16,10 @@ static const GUID GUID_DEVINTERFACE_YUANQIN_VHID = {
 typedef enum _YUANQIN_VHID_COMMAND_KIND {
     YuanqinVhidCommandPing = 0,
     YuanqinVhidCommandTap = 1,
-    YuanqinVhidCommandReleaseAll = 2
+    YuanqinVhidCommandReleaseAll = 2,
+    // Replaces the currently pressed keyboard report.  It is used for true
+    // long holds, and also lets normal taps coexist with held keys.
+    YuanqinVhidCommandSetPressedKeys = 3
 } YUANQIN_VHID_COMMAND_KIND;
 
 #pragma pack(push, 1)

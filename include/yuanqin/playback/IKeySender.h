@@ -21,6 +21,12 @@ public:
         return true;
     }
 
+    // Held notes use explicit key-down/key-up operations.  Stateless transports
+    // deliberately return false: pretending to hold with repeated taps would
+    // make the score sound wrong.
+    virtual bool pressChord(std::span<const char>) { return false; }
+    virtual bool releaseChord(std::span<const char>) { return false; }
+
     // Called when playback ends or is interrupted. Stateful backends use this
     // to prevent a key from remaining pressed after an error.
     virtual void releaseAll() noexcept {}

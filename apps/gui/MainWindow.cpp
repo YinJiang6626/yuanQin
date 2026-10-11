@@ -591,7 +591,7 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
                 draggingProgress_ = true;
                 dragWasPlaying_ = playbackRunning_;
                 draggedTick_ = progressTickFromX(point.x);
-                editor_.setPlayheadTick(draggedTick_, false);
+                editor_.setPlayheadTick(std::min(draggedTick_, activeScoreTickCount() - 1), false);
                 SetCapture(window_);
                 InvalidateRect(window_, nullptr, FALSE);
                 return 0;
@@ -676,7 +676,7 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
             }
             if (draggingProgress_) {
                 draggedTick_ = progressTickFromX(GET_X_LPARAM(lParam) - sidebarWidth());
-                editor_.setPlayheadTick(draggedTick_, false);
+                editor_.setPlayheadTick(std::min(draggedTick_, activeScoreTickCount() - 1), false);
                 InvalidateRect(window_, nullptr, FALSE);
                 return 0;
             }
@@ -1438,10 +1438,12 @@ void MainWindow::paint() {
     RECT progressTrack = progress;
     fillRoundedRect(context, progressTrack, 8, RGB(69, 118, 133));
     const std::size_t visibleTick = draggingProgress_ ? draggedTick_ : transportTick_;
-    const double ratio = transportTotalTicks_ <= 1
+    // A tick denotes the beginning of a minimum unit.  The transport reaches
+    // 100% only after that unit (including a final long hold) has ended.
+    const double ratio = transportTotalTicks_ == 0
         ? 0.0
         : std::clamp(static_cast<double>(visibleTick) /
-                         static_cast<double>(transportTotalTicks_ - 1),
+                         static_cast<double>(transportTotalTicks_),
                      0.0, 1.0);
     RECT progressFill = progress;
     progressFill.right = progress.left + static_cast<LONG>(
@@ -2462,7 +2464,7 @@ void MainWindow::startPlayback(std::size_t tickIndex) {
     }
 
     const std::size_t requestedTick = tickIndex;
-    transportTotalTicks_ = parseResult.score.tickCount();
+    transportTotalTicks_ = parseResult.score.playbackTickCount();
     if (transportTotalTicks_ == 0) {
         return;
     }
@@ -2474,7 +2476,7 @@ void MainWindow::startPlayback(std::size_t tickIndex) {
         transportTick_ = requestedTick;
         transportTotalTicks_ = std::max({transportTotalTicks_, activeScoreTickCount(),
                                          requestedTick + 1});
-        editor_.setPlayheadTick(requestedTick, false);
+        editor_.setPlayheadTick(std::min(requestedTick, activeScoreTickCount() - 1), false);
         setStatus(L"当前位置之后没有可播放的音符");
         return;
     }
@@ -2488,11 +2490,22 @@ void MainWindow::startPlayback(std::size_t tickIndex) {
         }
     }
     if (!hasRemainingNote) {
+        const std::size_t precedingCount = std::min(tickIndex, parseResult.score.tickCount());
+        for (std::size_t index = 0; index < precedingCount; ++index) {
+            const auto& event = parseResult.score.ticks()[index];
+            if (event && event->style == core::PlayStyle::Hold &&
+                index + std::max<std::size_t>(1, event->holdTicks) > tickIndex) {
+                hasRemainingNote = true;
+                break;
+            }
+        }
+    }
+    if (!hasRemainingNote) {
         if (playbackRunning_) {
             stopPlayback();
         }
         transportTick_ = tickIndex;
-        editor_.setPlayheadTick(tickIndex, false);
+        editor_.setPlayheadTick(std::min(tickIndex, activeScoreTickCount() - 1), false);
         setStatus(L"当前位置之后没有可播放的音符");
         return;
     }
@@ -2523,7 +2536,7 @@ void MainWindow::startPlayback(std::size_t tickIndex) {
     }
     transportTick_ = tickIndex;
     editor_.setPlaybackActive(true);
-    editor_.setPlayheadTick(tickIndex, true);
+    editor_.setPlayheadTick(std::min(tickIndex, activeScoreTickCount() - 1), true);
     EnableWindow(bpmEdit_, FALSE);
     EnableWindow(bpmCorrectionCombo_, FALSE);
     EnableWindow(arpeggioIntervalEdit_, FALSE);
@@ -2610,7 +2623,8 @@ void MainWindow::restorePlaybackSelection() {
         transportTick_ >= transportTotalTicks_;
     const std::size_t selectionTick = transportTotalTicks_ == 0
         ? 0
-        : std::min(transportTick_, transportTotalTicks_ - 1);
+        : std::min({transportTick_, transportTotalTicks_ - 1,
+                    activeScoreTickCount() - 1});
     auto& tab = documents_[activeDocument_];
     // The paired composition highlight is only used while playing.  On pause,
     // return to the hand where playback began, but keep its selection at the
@@ -2648,7 +2662,7 @@ void MainWindow::seekTo(std::size_t tickIndex, bool keepPlaying) {
             stopPlayback();
         }
         transportTick_ = tickIndex;
-        editor_.setPlayheadTick(tickIndex, false);
+        editor_.setPlayheadTick(std::min(tickIndex, activeScoreTickCount() - 1), false);
         InvalidateRect(window_, nullptr, FALSE);
     }
 }
@@ -2659,7 +2673,7 @@ void MainWindow::handlePlaybackProgress(std::uint64_t generation, std::size_t ti
     }
     transportTick_ = std::min(tickIndex, transportTotalTicks_);
     if (!draggingProgress_) {
-        editor_.setPlayheadTick(transportTick_, true);
+        editor_.setPlayheadTick(std::min(transportTick_, activeScoreTickCount() - 1), true);
     }
     InvalidateRect(window_, nullptr, FALSE);
 }
@@ -2679,7 +2693,8 @@ void MainWindow::handlePlaybackComplete(std::uint64_t generation, int status) {
     if (status == static_cast<int>(playback::PlaybackStatus::Completed)) {
         transportTick_ = transportTotalTicks_;
         if (transportTotalTicks_ > 0) {
-            editor_.setPlayheadTick(transportTotalTicks_ - 1, false);
+            editor_.setPlayheadTick(
+                std::min(transportTotalTicks_ - 1, activeScoreTickCount() - 1), false);
         }
         setStatus(L"播放完成");
     } else if (status == static_cast<int>(playback::PlaybackStatus::SendFailed)) {

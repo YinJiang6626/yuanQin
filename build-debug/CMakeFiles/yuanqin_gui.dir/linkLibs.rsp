@@ -1,0 +1,1 @@
+ libyuanqin_ui.a libyuanqin_playback.a -lcomdlg32 -lmsimg32 libyuanqin_ui_model.a -lgdi32 -limm32 -luser32 libyuanqin_core.a -lsetupapi -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32 

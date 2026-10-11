@@ -407,7 +407,8 @@ LRESULT ScoreEditor::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
                     return 0;
                 }
                 if (wParam == VK_OEM_4 || (wParam == '9' && (GetKeyState(VK_SHIFT) & 0x8000))) {
-                    beginGroup(wParam == VK_OEM_4 ? '[' : '(');
+                    const bool shifted = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+                    beginGroup(wParam == VK_OEM_4 ? (shifted ? '{' : '[') : '(');
                     return 0;
                 }
                 if (wParam == '0' && (GetKeyState(VK_SHIFT) & 0x8000)) {
@@ -417,6 +418,20 @@ LRESULT ScoreEditor::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
                 if (wParam == VK_SPACE) {
                     replaceSelection({std::string{}}, insertMode_);
                     return 0;
+                }
+                if (wParam == VK_OEM_MINUS && !hasSelection() && groupEditing_) {
+                    auto* document = activeDocument();
+                    const auto& value = document
+                        ? document->beat(selectedMeasure_, selectedBeat_)
+                        : std::string{};
+                    if (!value.empty() && value.front() == '{') {
+                        notifyBeforeChange();
+                        if (document->insertHoldDash(selectedMeasure_, selectedBeat_,
+                                                     groupCaretOffset_)) {
+                            notifyChanged();
+                        }
+                        return 0;
+                    }
                 }
             }
             const bool extendSelection = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
@@ -468,7 +483,7 @@ LRESULT ScoreEditor::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
                             ? document->beat(selectedMeasure_, selectedBeat_)
                             : std::string{};
                         if (value.size() >= 2 &&
-                            (value.front() == '(' || value.front() == '[')) {
+                            (value.front() == '(' || value.front() == '[' || value.front() == '{')) {
                             groupEditing_ = !groupEditing_;
                             if (groupEditing_) {
                                 resetGroupCaret();
@@ -779,7 +794,8 @@ void ScoreEditor::paint() {
             DrawTextW(context, wideValue.c_str(), -1, &textRect,
                       DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
             const bool hasGroupCursor = caret && groupEditing_ && !playbackActive_ && value.size() >= 2 &&
-                (value.front() == '(' || value.front() == '[') && groupCaretOffset_ > 0 &&
+                (value.front() == '(' || value.front() == '[' || value.front() == '{') &&
+                groupCaretOffset_ > 0 &&
                 groupCaretOffset_ < value.size();
             if (hasGroupCursor) {
                 SIZE total{};
@@ -990,7 +1006,8 @@ void ScoreEditor::resetGroupCaret() {
         return;
     }
     const auto& value = document->beat(selectedMeasure_, selectedBeat_);
-    groupCaretOffset_ = value.size() >= 2 && (value.front() == '(' || value.front() == '[')
+    groupCaretOffset_ = value.size() >= 2 &&
+        (value.front() == '(' || value.front() == '[' || value.front() == '{')
         ? value.size() - 1
         : 0;
 }
@@ -1004,7 +1021,8 @@ bool ScoreEditor::moveGroupCaret(int delta) {
         return false;
     }
     const auto& value = document->beat(selectedMeasure_, selectedBeat_);
-    if (value.size() < 2 || (value.front() != '(' && value.front() != '[')) {
+    if (value.size() < 2 ||
+        (value.front() != '(' && value.front() != '[' && value.front() != '{')) {
         return false;
     }
     if (groupCaretOffset_ == 0 || groupCaretOffset_ >= value.size()) {
@@ -1034,7 +1052,8 @@ bool ScoreEditor::deleteGroupBackward() {
         return false;
     }
     const auto& value = document->beat(selectedMeasure_, selectedBeat_);
-    if (value.size() < 2 || (value.front() != '(' && value.front() != '[')) {
+    if (value.size() < 2 ||
+        (value.front() != '(' && value.front() != '[' && value.front() != '{')) {
         groupEditing_ = false;
         return false;
     }
@@ -1082,7 +1101,8 @@ void ScoreEditor::typeNote(char note) {
         return;
     }
     const auto& before = document->beat(selectedMeasure_, selectedBeat_);
-    const bool isGroup = before.size() >= 2 && (before.front() == '(' || before.front() == '[');
+    const bool isGroup = before.size() >= 2 &&
+        (before.front() == '(' || before.front() == '[' || before.front() == '{');
     if (!hasSelection() && isGroup && groupEditing_) {
         notifyBeforeChange();
         if (document->insertGroupNote(selectedMeasure_, selectedBeat_, groupCaretOffset_, note)) {
@@ -1115,14 +1135,15 @@ void ScoreEditor::beginGroup(char opening) {
     }
     const auto& value = document->beat(selectedMeasure_, selectedBeat_);
     if (opening == '(' && !hasSelection() && value.size() >= 2 &&
-        value.front() == '[' && value.back() == ']' && groupEditing_) {
+        (value.front() == '[' || value.front() == '{') &&
+        (value.back() == ']' || value.back() == '}') && groupEditing_) {
         notifyBeforeChange();
         if (document->insertPipaChord(selectedMeasure_, selectedBeat_, groupCaretOffset_)) {
             notifyChanged();
             return;
         }
     }
-    const std::string group = opening == '(' ? "()" : "[]";
+    const std::string group = opening == '(' ? "()" : (opening == '[' ? "[]" : "{}");
     const std::size_t start = selectionStartTick();
     if (hasSelection() || insertMode_) {
         // Opening a group follows normal insert/replace rules.  The resulting
@@ -1282,11 +1303,14 @@ std::vector<std::string> ScoreEditor::clipboardBeats() const {
 
     for (std::size_t index = 0; index < text.size();) {
         const char value = text[index++];
-        if (value == '(' || value == '[') {
-            const char closing = value == '(' ? ')' : ']';
+        if (value == '(' || value == '[' || value == '{') {
+            const char closing = value == '(' ? ')' : (value == '[' ? ']' : '}');
             std::string group(1, value);
             while (index < text.size() && text[index] != closing) {
                 if (value == '[' && (text[index] == '(' || text[index] == ')')) {
+                    group.push_back(text[index]);
+                } else if (value == '{' &&
+                           (text[index] == '(' || text[index] == ')' || text[index] == '-')) {
                     group.push_back(text[index]);
                 } else if (core::ScoreParser::isPlayableNote(text[index])) {
                     group.push_back(text[index]);
@@ -1369,7 +1393,8 @@ bool ScoreEditor::selectAt(POINT point, bool toggleGroupEditing) {
     const auto* document = activeDocument();
     const std::string value = document ? document->beat(selectedMeasure_, selectedBeat_)
                                        : std::string{};
-    const bool isGroup = value.size() >= 2 && (value.front() == '(' || value.front() == '[');
+    const bool isGroup = value.size() >= 2 &&
+        (value.front() == '(' || value.front() == '[' || value.front() == '{');
     if (sameCell && toggleGroupEditing && isGroup) {
         groupEditing_ = !groupEditing_;
     } else if (!sameCell) {
