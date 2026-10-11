@@ -108,8 +108,8 @@ int main() {
     const auto fixedRatePipaResult = player.play(fixedRatePipaScore, fixedRatePipaSender, options);
     require(fixedRatePipaResult.status == PlaybackStatus::Completed,
             "fixed-rate arpeggio playback completes");
-    require(fixedRatePipaSender.notes == std::vector<char>({'A', 'S', 'D'}),
-            "a 6 ms pipa span skips the following three 2 ms score units");
+    require(fixedRatePipaSender.notes == std::vector<char>({'A', 'Z', 'S', 'X', 'C', 'D'}),
+            "a pipa stream no longer skips the following score units");
 
     RecordingSender holdSender;
     const auto holdScore = ScoreParser::parseText("{A-}S  /").score;

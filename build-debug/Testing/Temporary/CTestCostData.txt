@@ -1,5 +1,5 @@
-yuanqin_score_parser_tests 8 0.00564138
-yuanqin_score_document_tests 8 0.0039574
-yuanqin_composition_document_tests 8 0.00438122
-yuanqin_music_player_tests 8 0.0074437
+yuanqin_score_parser_tests 10 0.0019993
+yuanqin_score_document_tests 10 0.00175247
+yuanqin_composition_document_tests 10 0.00197636
+yuanqin_music_player_tests 10 0.00396978
 ---
