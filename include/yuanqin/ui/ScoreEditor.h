@@ -72,6 +72,7 @@ private:
     void collapseSelectionForMove(bool towardEnd);
     void replaceSelection(const std::vector<std::string>& values, bool insertBefore);
     void typeNote(char note);
+    void typeArpeggioStopMarker();
     void beginGroup(char opening);
     [[nodiscard]] bool moveGroupCaret(int delta);
     [[nodiscard]] bool deleteGroupBackward();

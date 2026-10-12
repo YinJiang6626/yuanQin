@@ -60,6 +60,34 @@ int main() {
     require(!pipaMeasure.score.ticks()[1] && !pipaMeasure.score.ticks()[2] &&
                 !pipaMeasure.score.ticks()[3],
             "spaces after pipa are rests");
+    require(pipaMeasure.score.ticks()[0]->adaptiveArpeggioSpanTicks == 4,
+            "an adaptive pipa precomputes its span from following empty beats");
+
+    const auto stoppedPipa = ScoreParser::parseText("[AS]Q(|W) /");
+    require(stoppedPipa.score.ticks()[2]->arpeggioStop,
+            "a stop marker inside a chord is retained without suppressing its notes");
+    require(stoppedPipa.score.ticks()[0]->adaptiveArpeggioSpanTicks == 2,
+            "an attached stop marker ends the pipa before its own chord cell");
+
+    const auto nextPipa = ScoreParser::parseText("[A] [S] /");
+    require(nextPipa.score.ticks()[0]->adaptiveArpeggioSpanTicks == 2,
+            "the following pipa bounds an unstopped adaptive pipa span");
+
+    const auto stoppedAfterFourCells = ScoreParser::parseText("[ASDFG]    |");
+    require(stoppedAfterFourCells.score.ticks()[0]->adaptiveArpeggioSpanTicks == 5,
+            "a standalone stop marker ends the pipa without adding a sounding cell");
+    const auto stoppedAfterTwoCells = ScoreParser::parseText("[ASDFG]  |");
+    require(stoppedAfterTwoCells.score.ticks()[0]->adaptiveArpeggioSpanTicks == 3,
+            "two rests followed by a standalone stop make a three-cell pipa span");
+    const auto stoppedInsideChord = ScoreParser::parseText("[ASDFG]  (A|)");
+    require(stoppedInsideChord.score.ticks()[0]->adaptiveArpeggioSpanTicks == 3,
+            "a stop marker attached to a chord does not add that chord cell to the pipa span");
+    const auto stopWithConcurrentNote = ScoreParser::parseText("[ASDFG]QW(|E)");
+    require(stopWithConcurrentNote.score.ticks()[0]->adaptiveArpeggioSpanTicks == 3,
+            "a note sharing a stop-marker cell plays outside the pipa duration");
+    const auto unstoppedPipa = ScoreParser::parseText("[ASDFG]  A");
+    require(unstoppedPipa.score.ticks()[0]->adaptiveArpeggioSpanTicks == 3,
+            "without a stop marker, only directly following rests extend a pipa span");
 
     const auto held = ScoreParser::parseText("{W-}{(ASD)---}  /");
     require(held.success, "long-hold notation parses successfully");
@@ -71,6 +99,21 @@ int main() {
     require(held.score.ticks()[1]->notes == std::vector<char>({'A', 'S', 'D'}) &&
                 held.score.ticks()[1]->holdTicks == 4,
             "a held chord and its duration are retained");
+
+    const auto embeddedHoldFirst = ScoreParser::parseText("({W--}A)/");
+    const auto embeddedHoldLast = ScoreParser::parseText("(A{W--})/");
+    require(embeddedHoldFirst.score.ticks()[0]->notes == std::vector<char>({'A'}) &&
+                embeddedHoldFirst.score.ticks()[0]->embeddedHolds.size() == 1 &&
+                embeddedHoldFirst.score.ticks()[0]->embeddedHolds[0].notes ==
+                    std::vector<char>({'W'}) &&
+                embeddedHoldFirst.score.ticks()[0]->embeddedHolds[0].holdTicks == 3,
+            "a chord can contain an independently held note");
+    require(embeddedHoldLast.score.ticks()[0]->notes == embeddedHoldFirst.score.ticks()[0]->notes &&
+                embeddedHoldLast.score.ticks()[0]->embeddedHolds[0].notes ==
+                    embeddedHoldFirst.score.ticks()[0]->embeddedHolds[0].notes &&
+                embeddedHoldLast.score.ticks()[0]->embeddedHolds[0].holdTicks ==
+                    embeddedHoldFirst.score.ticks()[0]->embeddedHolds[0].holdTicks,
+            "embedded holds have the same meaning regardless of their order in a chord");
 
     const auto endingHold = ScoreParser::parseText("ABC{W---}/");
     require(endingHold.score.tickCount() == 4 && endingHold.score.playbackTickCount() == 7,

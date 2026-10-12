@@ -1,18 +1,18 @@
-Start testing: Oct 11 17:47 中国标准时间
+Start testing: Oct 12 12:59 中国标准时间
 ----------------------------------------------------------
 1/4 Testing: yuanqin_score_parser_tests
 1/4 Test: yuanqin_score_parser_tests
 Command: "E:/projects_in_progress/yuanQin/build-debug/yuanqin_score_parser_tests.exe"
 Directory: E:/projects_in_progress/yuanQin/build-debug
-"yuanqin_score_parser_tests" start time: Oct 11 17:47 中国标准时间
+"yuanqin_score_parser_tests" start time: Oct 12 12:59 中国标准时间
 Output:
 ----------------------------------------------------------
 Score parser tests passed.
 <end of output>
-Test time =   0.02 sec
+Test time =   0.04 sec
 ----------------------------------------------------------
 Test Passed.
-"yuanqin_score_parser_tests" end time: Oct 11 17:47 中国标准时间
+"yuanqin_score_parser_tests" end time: Oct 12 12:59 中国标准时间
 "yuanqin_score_parser_tests" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -20,15 +20,15 @@ Test Passed.
 2/4 Test: yuanqin_score_document_tests
 Command: "E:/projects_in_progress/yuanQin/build-debug/yuanqin_score_document_tests.exe"
 Directory: E:/projects_in_progress/yuanQin/build-debug
-"yuanqin_score_document_tests" start time: Oct 11 17:47 中国标准时间
+"yuanqin_score_document_tests" start time: Oct 12 12:59 中国标准时间
 Output:
 ----------------------------------------------------------
 Score document tests passed.
 <end of output>
-Test time =   0.02 sec
+Test time =   0.03 sec
 ----------------------------------------------------------
 Test Passed.
-"yuanqin_score_document_tests" end time: Oct 11 17:47 中国标准时间
+"yuanqin_score_document_tests" end time: Oct 12 12:59 中国标准时间
 "yuanqin_score_document_tests" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -36,15 +36,15 @@ Test Passed.
 3/4 Test: yuanqin_composition_document_tests
 Command: "E:/projects_in_progress/yuanQin/build-debug/yuanqin_composition_document_tests.exe"
 Directory: E:/projects_in_progress/yuanQin/build-debug
-"yuanqin_composition_document_tests" start time: Oct 11 17:47 中国标准时间
+"yuanqin_composition_document_tests" start time: Oct 12 12:59 中国标准时间
 Output:
 ----------------------------------------------------------
 Composition document tests passed.
 <end of output>
-Test time =   0.02 sec
+Test time =   0.04 sec
 ----------------------------------------------------------
 Test Passed.
-"yuanqin_composition_document_tests" end time: Oct 11 17:47 中国标准时间
+"yuanqin_composition_document_tests" end time: Oct 12 12:59 中国标准时间
 "yuanqin_composition_document_tests" time elapsed: 00:00:00
 ----------------------------------------------------------
 
@@ -52,16 +52,16 @@ Test Passed.
 4/4 Test: yuanqin_music_player_tests
 Command: "E:/projects_in_progress/yuanQin/build-debug/yuanqin_music_player_tests.exe"
 Directory: E:/projects_in_progress/yuanQin/build-debug
-"yuanqin_music_player_tests" start time: Oct 11 17:47 中国标准时间
+"yuanqin_music_player_tests" start time: Oct 12 12:59 中国标准时间
 Output:
 ----------------------------------------------------------
 Music player tests passed.
 <end of output>
-Test time =   0.04 sec
+Test time =   0.06 sec
 ----------------------------------------------------------
 Test Passed.
-"yuanqin_music_player_tests" end time: Oct 11 17:47 中国标准时间
+"yuanqin_music_player_tests" end time: Oct 12 12:59 中国标准时间
 "yuanqin_music_player_tests" time elapsed: 00:00:00
 ----------------------------------------------------------
 
-End testing: Oct 11 17:47 中国标准时间
+End testing: Oct 12 12:59 中国标准时间

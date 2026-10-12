@@ -14,6 +14,25 @@ char normalize(char value) noexcept {
     return static_cast<char>(std::toupper(static_cast<unsigned char>(value)));
 }
 
+// Appends one complete {note---} expression while preserving its optional
+// inner chord. `index` must point at the opening brace on entry.
+void appendHold(std::string_view source, std::size_t& index, std::string& target) {
+    target.push_back('{');
+    ++index;
+    while (index < source.size() && source[index] != '}') {
+        const char current = source[index++];
+        if (core::ScoreParser::isPlayableNote(current)) {
+            target.push_back(normalize(current));
+        } else if (current == '-' || current == '(' || current == ')') {
+            target.push_back(current);
+        }
+    }
+    if (index < source.size() && source[index] == '}') {
+        ++index;
+    }
+    target.push_back('}');
+}
+
 EditableMeasure parseMeasure(std::string_view source) {
     EditableMeasure result;
     std::size_t beatIndex = 0;
@@ -32,10 +51,16 @@ EditableMeasure parseMeasure(std::string_view source) {
         if (value == '(') {
             std::string group(1, value);
             while (index < source.size() && source[index] != ')') {
-                if (core::ScoreParser::isPlayableNote(source[index])) {
-                    group.push_back(normalize(source[index]));
+                if (source[index] == '{') {
+                    appendHold(source, index, group);
+                    continue;
                 }
-                ++index;
+                const char current = source[index++];
+                if (core::ScoreParser::isPlayableNote(current)) {
+                    group.push_back(normalize(current));
+                } else if (current == '|') {
+                    group.push_back('|');
+                }
             }
             if (index < source.size() && source[index] == ')') {
                 ++index;
@@ -77,20 +102,15 @@ EditableMeasure parseMeasure(std::string_view source) {
         }
 
         if (value == '{') {
-            std::string group("{");
-            while (index < source.size() && source[index] != '}') {
-                const char current = source[index++];
-                if (core::ScoreParser::isPlayableNote(current) || current == '-' ||
-                    current == '(' || current == ')') {
-                    group.push_back(core::ScoreParser::isPlayableNote(current)
-                                        ? normalize(current) : current);
-                }
-            }
-            if (index < source.size() && source[index] == '}') {
-                ++index;
-            }
-            group.push_back('}');
+            std::string group;
+            --index;
+            appendHold(source, index, group);
             result.beats[beatIndex++] = std::move(group);
+            continue;
+        }
+
+        if (value == '|') {
+            result.beats[beatIndex++] = "|";
             continue;
         }
 
@@ -111,9 +131,16 @@ std::string sanitizeBeat(std::string_view value) {
     const char first = value.front();
     if (first == '(') {
         std::string result("(");
-        for (std::size_t index = 1; index < value.size(); ++index) {
-            if (core::ScoreParser::isPlayableNote(value[index])) {
-                result.push_back(normalize(value[index]));
+        for (std::size_t index = 1; index < value.size() && value[index] != ')';) {
+            if (value[index] == '{') {
+                appendHold(value, index, result);
+                continue;
+            }
+            const char current = value[index++];
+            if (core::ScoreParser::isPlayableNote(current)) {
+                result.push_back(normalize(current));
+            } else if (current == '|') {
+                result.push_back('|');
             }
         }
         result.push_back(')');
@@ -159,6 +186,9 @@ std::string sanitizeBeat(std::string_view value) {
 
     if (core::ScoreParser::isPlayableNote(first)) {
         return std::string(1, normalize(first));
+    }
+    if (first == '|') {
+        return "|";
     }
     return {};
 }
@@ -289,17 +319,56 @@ bool ScoreDocument::insertGroupNote(std::size_t measureIndex, std::size_t beatIn
     return true;
 }
 
+bool ScoreDocument::insertGroupStopMarker(std::size_t measureIndex, std::size_t beatIndex,
+                                          std::size_t& caretOffset) {
+    if (measureIndex >= measures_.size() || beatIndex >= kBeatsPerMeasure) {
+        return false;
+    }
+    auto& value = measures_[measureIndex].beats[beatIndex];
+    if (value.size() < 2 || value.front() != '(' || value.back() != ')') {
+        return false;
+    }
+    caretOffset = std::clamp(caretOffset, std::size_t{1}, value.size() - 1);
+    value.insert(value.begin() + static_cast<std::ptrdiff_t>(caretOffset), '|');
+    ++caretOffset;
+    return true;
+}
+
 bool ScoreDocument::insertHoldDash(std::size_t measureIndex, std::size_t beatIndex,
                                    std::size_t& caretOffset) {
     if (measureIndex >= measures_.size() || beatIndex >= kBeatsPerMeasure) {
         return false;
     }
     auto& value = measures_[measureIndex].beats[beatIndex];
-    if (value.size() < 2 || value.front() != '{' || value.back() != '}') {
+    if (value.size() < 2) {
+        return false;
+    }
+    caretOffset = std::min(caretOffset, value.size() - 1);
+    const std::size_t opening = value.rfind('{', caretOffset);
+    if (opening == std::string::npos) {
+        return false;
+    }
+    const std::size_t closing = value.find('}', opening + 1);
+    if (closing == std::string::npos || caretOffset > closing) {
+        return false;
+    }
+    caretOffset = std::clamp(caretOffset, opening + 1, closing);
+    value.insert(value.begin() + static_cast<std::ptrdiff_t>(caretOffset), '-');
+    ++caretOffset;
+    return true;
+}
+
+bool ScoreDocument::insertEmbeddedHold(std::size_t measureIndex, std::size_t beatIndex,
+                                       std::size_t& caretOffset) {
+    if (measureIndex >= measures_.size() || beatIndex >= kBeatsPerMeasure) {
+        return false;
+    }
+    auto& value = measures_[measureIndex].beats[beatIndex];
+    if (value.size() < 2 || value.front() != '(' || value.back() != ')') {
         return false;
     }
     caretOffset = std::clamp(caretOffset, std::size_t{1}, value.size() - 1);
-    value.insert(value.begin() + static_cast<std::ptrdiff_t>(caretOffset), '-');
+    value.insert(caretOffset, "{}");
     ++caretOffset;
     return true;
 }

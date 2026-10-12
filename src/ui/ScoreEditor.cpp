@@ -424,7 +424,13 @@ LRESULT ScoreEditor::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
                     const auto& value = document
                         ? document->beat(selectedMeasure_, selectedBeat_)
                         : std::string{};
-                    if (!value.empty() && value.front() == '{') {
+                    const std::size_t opening = value.empty()
+                        ? std::string::npos
+                        : value.rfind('{', std::min(groupCaretOffset_, value.size() - 1));
+                    const std::size_t closing = opening == std::string::npos
+                        ? std::string::npos : value.find('}', opening + 1);
+                    if (opening != std::string::npos && closing != std::string::npos &&
+                        groupCaretOffset_ <= closing) {
                         notifyBeforeChange();
                         if (document->insertHoldDash(selectedMeasure_, selectedBeat_,
                                                      groupCaretOffset_)) {
@@ -432,6 +438,10 @@ LRESULT ScoreEditor::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
                         }
                         return 0;
                     }
+                }
+                if (wParam == VK_OEM_5 && (GetKeyState(VK_SHIFT) & 0x8000)) {
+                    typeArpeggioStopMarker();
+                    return 0;
                 }
             }
             const bool extendSelection = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
@@ -1128,12 +1138,45 @@ void ScoreEditor::typeNote(char note) {
     }
 }
 
+void ScoreEditor::typeArpeggioStopMarker() {
+    auto* document = activeDocument();
+    if (!document) {
+        return;
+    }
+    const auto& before = document->beat(selectedMeasure_, selectedBeat_);
+    const bool isChord = before.size() >= 2 && before.front() == '(' && before.back() == ')';
+    if (!hasSelection() && isChord && groupEditing_) {
+        notifyBeforeChange();
+        if (document->insertGroupStopMarker(selectedMeasure_, selectedBeat_, groupCaretOffset_)) {
+            notifyChanged();
+        }
+        return;
+    }
+    if (!hasSelection() && !before.empty() &&
+        (before.front() == '(' || before.front() == '[' || before.front() == '{')) {
+        replaceSelection({"|"}, insertMode_);
+        return;
+    }
+    replaceSelection({"|"}, insertMode_);
+}
+
 void ScoreEditor::beginGroup(char opening) {
     auto* document = activeDocument();
     if (!document) {
         return;
     }
     const auto& value = document->beat(selectedMeasure_, selectedBeat_);
+    if (opening == '{' && !hasSelection() && value.size() >= 2 &&
+        value.front() == '(' && value.back() == ')' && groupEditing_) {
+        notifyBeforeChange();
+        if (document->insertEmbeddedHold(selectedMeasure_, selectedBeat_, groupCaretOffset_)) {
+            notifyChanged();
+            if (window_) {
+                InvalidateRect(window_, nullptr, FALSE);
+            }
+            return;
+        }
+    }
     if (opening == '(' && !hasSelection() && value.size() >= 2 &&
         (value.front() == '[' || value.front() == '{') &&
         (value.back() == ']' || value.back() == '}') && groupEditing_) {
@@ -1307,7 +1350,26 @@ std::vector<std::string> ScoreEditor::clipboardBeats() const {
             const char closing = value == '(' ? ')' : (value == '[' ? ']' : '}');
             std::string group(1, value);
             while (index < text.size() && text[index] != closing) {
+                if (value == '(' && text[index] == '{') {
+                    group.push_back(text[index++]);
+                    while (index < text.size() && text[index] != '}') {
+                        const char holdValue = text[index++];
+                        if (core::ScoreParser::isPlayableNote(holdValue)) {
+                            group.push_back(holdValue);
+                        } else if (holdValue == '(' || holdValue == ')' || holdValue == '-') {
+                            group.push_back(holdValue);
+                        }
+                    }
+                    if (index < text.size() && text[index] == '}') {
+                        group.push_back(text[index++]);
+                    } else {
+                        group.push_back('}');
+                    }
+                    continue;
+                }
                 if (value == '[' && (text[index] == '(' || text[index] == ')')) {
+                    group.push_back(text[index]);
+                } else if (value == '(' && text[index] == '|') {
                     group.push_back(text[index]);
                 } else if (value == '{' &&
                            (text[index] == '(' || text[index] == ')' || text[index] == '-')) {
@@ -1324,6 +1386,8 @@ std::vector<std::string> ScoreEditor::clipboardBeats() const {
             result.push_back(std::move(group));
         } else if (value == ' ') {
             result.emplace_back();
+        } else if (value == '|') {
+            result.emplace_back("|");
         } else if (core::ScoreParser::isPlayableNote(value)) {
             result.emplace_back(1, value);
         }

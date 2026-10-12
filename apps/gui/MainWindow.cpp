@@ -37,12 +37,14 @@ constexpr int kArpeggioIntervalControlId = 1005;
 constexpr int kDefaultBpmControlId = 1006;
 constexpr int kDefaultBpmCorrectionControlId = 1007;
 constexpr int kDefaultArpeggioIntervalControlId = 1008;
+constexpr int kArpeggioTimingModeControlId = 1009;
+constexpr int kDefaultArpeggioTimingModeControlId = 1010;
 constexpr int kTempoPanelCollapsedHeight = 28;
 constexpr int kTempoPanelMinimumHeight = 92;
 constexpr int kSidebarCollapsedWidth = 62;
 constexpr int kSidebarExpandedWidth = 132;
 constexpr int kSettingsHeaderHeight = 108;
-constexpr int kSettingsContentHeight = 800;
+constexpr int kSettingsContentHeight = 840;
 constexpr std::array<int, 5> kBpmCorrections{1, 2, 4, 8, 16};
 constexpr UINT kPlaybackProgressMessage = WM_APP + 11;
 constexpr UINT kPlaybackCompleteMessage = WM_APP + 12;
@@ -256,6 +258,11 @@ bool MainWindow::processShortcut(const MSG& message) {
             invoke((GetKeyState(VK_SHIFT) & 0x8000) ? ToolbarAction::SaveAs
                                                     : ToolbarAction::Save);
             return true;
+        case 'D':
+            if (!playbackRunning_ && activeDocument_ < documents_.size()) {
+                refreshPreparedScore(activeDocument_, true);
+            }
+            return true;
         case 'W':
             if (!documents_.empty()) {
                 closeDocument(activeDocument_);
@@ -325,6 +332,21 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
             }
             SendMessageW(arpeggioIntervalEdit_, WM_SETFONT,
                          reinterpret_cast<WPARAM>(interfaceFont_), TRUE);
+            arpeggioTimingCombo_ = CreateWindowExW(
+                0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_VSCROLL |
+                    CBS_DROPDOWNLIST,
+                0, 0, 0, 0, window_,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kArpeggioTimingModeControlId)),
+                instance_, nullptr);
+            if (!arpeggioTimingCombo_) {
+                return -1;
+            }
+            SendMessageW(arpeggioTimingCombo_, WM_SETFONT,
+                         reinterpret_cast<WPARAM>(interfaceFont_), TRUE);
+            SendMessageW(arpeggioTimingCombo_, CB_ADDSTRING, 0,
+                         reinterpret_cast<LPARAM>(L"固定速度"));
+            SendMessageW(arpeggioTimingCombo_, CB_ADDSTRING, 0,
+                         reinterpret_cast<LPARAM>(L"自适应"));
             outputBackendCombo_ = CreateWindowExW(
                 0, L"COMBOBOX", L"",
                 WS_CHILD | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST,
@@ -355,18 +377,27 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
                 0, 0, 0, 0, window_,
                 reinterpret_cast<HMENU>(static_cast<INT_PTR>(kDefaultArpeggioIntervalControlId)),
                 instance_, nullptr);
+            defaultArpeggioTimingCombo_ = CreateWindowExW(
+                0, L"COMBOBOX", L"", WS_CHILD | WS_TABSTOP | WS_VSCROLL | CBS_DROPDOWNLIST,
+                0, 0, 0, 0, window_,
+                reinterpret_cast<HMENU>(static_cast<INT_PTR>(kDefaultArpeggioTimingModeControlId)),
+                instance_, nullptr);
             if (!defaultBpmEdit_ || !defaultBpmCorrectionCombo_ ||
-                !defaultArpeggioIntervalEdit_) {
+                !defaultArpeggioIntervalEdit_ || !defaultArpeggioTimingCombo_) {
                 return -1;
             }
             for (HWND control : {defaultBpmEdit_, defaultBpmCorrectionCombo_,
-                                 defaultArpeggioIntervalEdit_}) {
+                                 defaultArpeggioIntervalEdit_, defaultArpeggioTimingCombo_}) {
                 SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(interfaceFont_), TRUE);
             }
             for (const wchar_t* multiplier : {L"×1", L"×2", L"×4", L"×8", L"×16"}) {
                 SendMessageW(defaultBpmCorrectionCombo_, CB_ADDSTRING, 0,
                              reinterpret_cast<LPARAM>(multiplier));
             }
+            SendMessageW(defaultArpeggioTimingCombo_, CB_ADDSTRING, 0,
+                         reinterpret_cast<LPARAM>(L"固定速度"));
+            SendMessageW(defaultArpeggioTimingCombo_, CB_ADDSTRING, 0,
+                         reinterpret_cast<LPARAM>(L"自适应"));
             syncSystemSettingsControls();
             bpmEditBrush_ = CreateSolidBrush(RGB(232, 247, 249));
             editor_.setBeforeChangeCallback([this] { recordActiveDocumentHistory(); });
@@ -405,6 +436,11 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
                 updateArpeggioIntervalFromControl();
                 return 0;
             }
+            if (LOWORD(wParam) == kArpeggioTimingModeControlId &&
+                HIWORD(wParam) == CBN_SELCHANGE) {
+                updateArpeggioTimingModeFromControl();
+                return 0;
+            }
             if (LOWORD(wParam) == kDefaultBpmControlId && HIWORD(wParam) == EN_CHANGE) {
                 updateDefaultBpmFromControl();
                 return 0;
@@ -412,6 +448,11 @@ LRESULT MainWindow::handleMessage(UINT message, WPARAM wParam, LPARAM lParam) {
             if (LOWORD(wParam) == kDefaultArpeggioIntervalControlId &&
                 HIWORD(wParam) == EN_CHANGE) {
                 updateDefaultArpeggioIntervalFromControl();
+                return 0;
+            }
+            if (LOWORD(wParam) == kDefaultArpeggioTimingModeControlId &&
+                HIWORD(wParam) == CBN_SELCHANGE) {
+                updateDefaultArpeggioTimingModeFromControl();
                 return 0;
             }
             if (LOWORD(wParam) == kBpmCorrectionControlId &&
@@ -797,8 +838,9 @@ void MainWindow::destroyFonts() {
 
 void MainWindow::layoutChildren() {
     if (!window_ || !editor_.handle() || !bpmEdit_ || !bpmCorrectionCombo_ ||
-        !arpeggioIntervalEdit_ || !outputBackendCombo_ || !defaultBpmEdit_ ||
-        !defaultBpmCorrectionCombo_ || !defaultArpeggioIntervalEdit_) {
+        !arpeggioIntervalEdit_ || !arpeggioTimingCombo_ || !outputBackendCombo_ || !defaultBpmEdit_ ||
+        !defaultBpmCorrectionCombo_ || !defaultArpeggioIntervalEdit_ ||
+        !defaultArpeggioTimingCombo_) {
         return;
     }
     RECT client{};
@@ -826,6 +868,11 @@ void MainWindow::layoutChildren() {
                tempoLayout.arpeggio.controlBounds.right -
                    tempoLayout.arpeggio.controlBounds.left,
                27, TRUE);
+    MoveWindow(arpeggioTimingCombo_, sidebar + tempoLayout.arpeggioTiming.controlBounds.left,
+               tempoLayout.arpeggioTiming.controlBounds.top,
+               tempoLayout.arpeggioTiming.controlBounds.right -
+                   tempoLayout.arpeggioTiming.controlBounds.left,
+               220, TRUE);
 
     const int settingsCardTop = kSettingsHeaderHeight + 28 - settingsScrollOffset_;
     const int defaultValuesTop = settingsCardTop + 230;
@@ -835,6 +882,7 @@ void MainWindow::layoutChildren() {
     MoveWindow(defaultBpmEdit_, defaultControlX, defaultValuesTop + 84, 92, 27, TRUE);
     MoveWindow(defaultBpmCorrectionCombo_, defaultControlX, defaultValuesTop + 124, 92, 220, TRUE);
     MoveWindow(defaultArpeggioIntervalEdit_, defaultControlX, defaultValuesTop + 164, 92, 27, TRUE);
+    MoveWindow(defaultArpeggioTimingCombo_, defaultControlX, defaultValuesTop + 204, 116, 220, TRUE);
     updatePageVisibility();
 }
 
@@ -946,6 +994,7 @@ MainWindow::TempoPanelLayout MainWindow::tempoPanelLayout() const {
     layout.bpm = placeSetting(52, 82);
     layout.correction = placeSetting(52, 92);
     layout.arpeggio = placeSetting(156, 82);
+    layout.arpeggioTiming = placeSetting(92, 116);
     layout.contentHeight = y + kControlHeight;
     return layout;
 }
@@ -1532,6 +1581,9 @@ void MainWindow::paintTempoPanel(HDC context, const RECT& client) {
     RECT pipaLabel = tempoLayout.arpeggio.labelBounds;
     DrawTextW(context, L"琵琶音间隔（ms）", -1, &pipaLabel,
               DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    RECT pipaTimingLabel = tempoLayout.arpeggioTiming.labelBounds;
+    DrawTextW(context, L"琵琶音方式", -1, &pipaTimingLabel,
+              DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     RestoreDC(context, saved);
 
     const int maximum = maximumTempoPanelScroll();
@@ -1679,7 +1731,7 @@ void MainWindow::paintSettingsPage(HDC context, const RECT& client) {
               DT_LEFT | DT_TOP | DT_WORDBREAK | DT_END_ELLIPSIS);
 
     const int defaultValuesTop = systemIoCard.bottom + 24;
-    const RECT defaultValuesCard{cardLeft, defaultValuesTop, cardRight, defaultValuesTop + 230};
+    const RECT defaultValuesCard{cardLeft, defaultValuesTop, cardRight, defaultValuesTop + 270};
     fillRoundedRect(context, defaultValuesCard, 18, RGB(236, 247, 249));
     const RECT defaultValuesAccent{defaultValuesCard.left, defaultValuesCard.top,
                                    defaultValuesCard.left + 6, defaultValuesCard.bottom};
@@ -1706,10 +1758,14 @@ void MainWindow::paintSettingsPage(HDC context, const RECT& client) {
                                  defaultLabelRight, defaultValuesCard.top + 152};
     RECT defaultArpeggioLabel{defaultLabelLeft, defaultValuesCard.top + 162,
                                defaultLabelRight, defaultValuesCard.top + 192};
+    RECT defaultArpeggioTimingLabel{defaultLabelLeft, defaultValuesCard.top + 202,
+                                    defaultLabelRight, defaultValuesCard.top + 232};
     DrawTextW(context, L"BPM", -1, &defaultBpmLabel, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     DrawTextW(context, L"补正", -1, &defaultCorrectionLabel,
               DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     DrawTextW(context, L"琵琶音间隔（ms）", -1, &defaultArpeggioLabel,
+              DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    DrawTextW(context, L"琵琶音方式", -1, &defaultArpeggioTimingLabel,
               DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     const int shortcutTop = defaultValuesCard.bottom + 24;
@@ -1773,8 +1829,9 @@ void MainWindow::toggleSidebar() {
 
 void MainWindow::updatePageVisibility() {
     if (!editor_.handle() || !bpmEdit_ || !bpmCorrectionCombo_ || !arpeggioIntervalEdit_ ||
+        !arpeggioTimingCombo_ ||
         !outputBackendCombo_ || !defaultBpmEdit_ || !defaultBpmCorrectionCombo_ ||
-        !defaultArpeggioIntervalEdit_) {
+        !defaultArpeggioIntervalEdit_ || !defaultArpeggioTimingCombo_) {
         return;
     }
     const bool workspaceVisible = activePage_ == Page::Workspace || activePage_ == Page::Composition;
@@ -1793,6 +1850,9 @@ void MainWindow::updatePageVisibility() {
     ShowWindow(arpeggioIntervalEdit_, workspaceVisible && tempoPanelExpanded_ &&
                                             controlVisible(tempoLayout.arpeggio.controlBounds)
                                         ? SW_SHOW : SW_HIDE);
+    ShowWindow(arpeggioTimingCombo_, workspaceVisible && tempoPanelExpanded_ &&
+                                         controlVisible(tempoLayout.arpeggioTiming.controlBounds)
+                                     ? SW_SHOW : SW_HIDE);
     const RECT settingsViewport = settingsViewportBounds();
     const int systemIoTop = kSettingsHeaderHeight + 28 - settingsScrollOffset_;
     const int defaultValuesTop = systemIoTop + 230;
@@ -1810,6 +1870,9 @@ void MainWindow::updatePageVisibility() {
     ShowWindow(defaultArpeggioIntervalEdit_,
                settingsVisible && settingsControlVisible(defaultValuesTop + 164)
                    ? SW_SHOW : SW_HIDE);
+    ShowWindow(defaultArpeggioTimingCombo_,
+               settingsVisible && settingsControlVisible(defaultValuesTop + 204)
+                   ? SW_SHOW : SW_HIDE);
 }
 
 void MainWindow::syncBpmEditor() {
@@ -1817,7 +1880,7 @@ void MainWindow::syncBpmEditor() {
 }
 
 void MainWindow::syncTempoControls() {
-    if (!bpmEdit_ || !bpmCorrectionCombo_ || !arpeggioIntervalEdit_ ||
+    if (!bpmEdit_ || !bpmCorrectionCombo_ || !arpeggioIntervalEdit_ || !arpeggioTimingCombo_ ||
         activeDocument_ >= documents_.size()) {
         return;
     }
@@ -1832,6 +1895,13 @@ void MainWindow::syncTempoControls() {
     SendMessageW(bpmCorrectionCombo_, CB_SETCURSEL, selection, 0);
     SetWindowTextW(arpeggioIntervalEdit_,
                    std::to_wstring(documents_[activeDocument_].arpeggioIntervalMs).c_str());
+    SendMessageW(arpeggioTimingCombo_, CB_SETCURSEL,
+                 documents_[activeDocument_].arpeggioTimingMode ==
+                         playback::ArpeggioTimingMode::Fixed ? 0 : 1,
+                 0);
+    EnableWindow(arpeggioIntervalEdit_,
+                 documents_[activeDocument_].arpeggioTimingMode ==
+                     playback::ArpeggioTimingMode::Fixed && !playbackRunning_);
     updatingTempoControls_ = false;
     updatingBpmEdit_ = false;
 }
@@ -1888,6 +1958,10 @@ void MainWindow::loadSystemSettings() {
                 if (interval > 0 && interval <= 10000) {
                     systemSettings_.defaultArpeggioIntervalMs = interval;
                 }
+            } else if (key == "default_arpeggio_timing") {
+                systemSettings_.defaultArpeggioTimingMode = value == "adaptive"
+                    ? playback::ArpeggioTimingMode::Adaptive
+                    : playback::ArpeggioTimingMode::Fixed;
             }
         } catch (const std::exception&) {
             // Keep the built-in default when a hand-edited configuration value is invalid.
@@ -1909,11 +1983,14 @@ void MainWindow::saveSystemSettings() const {
                                                systemSettings_.defaultBpmText.end()) << '\n';
     output << "default_correction=" << systemSettings_.defaultBpmCorrection << '\n';
     output << "default_arpeggio_interval_ms=" << systemSettings_.defaultArpeggioIntervalMs << '\n';
+    output << "default_arpeggio_timing=" <<
+        (systemSettings_.defaultArpeggioTimingMode == playback::ArpeggioTimingMode::Adaptive
+             ? "adaptive" : "fixed") << '\n';
 }
 
 void MainWindow::syncSystemSettingsControls() {
     if (!outputBackendCombo_ || !defaultBpmEdit_ || !defaultBpmCorrectionCombo_ ||
-        !defaultArpeggioIntervalEdit_) {
+        !defaultArpeggioIntervalEdit_ || !defaultArpeggioTimingCombo_) {
         return;
     }
     updatingSystemSettingsControls_ = true;
@@ -1927,6 +2004,10 @@ void MainWindow::syncSystemSettingsControls() {
                      static_cast<LRESULT>(std::distance(kBpmCorrections.begin(), match)), 0);
     SetWindowTextW(defaultArpeggioIntervalEdit_,
                    std::to_wstring(systemSettings_.defaultArpeggioIntervalMs).c_str());
+    SendMessageW(defaultArpeggioTimingCombo_, CB_SETCURSEL,
+                 systemSettings_.defaultArpeggioTimingMode ==
+                         playback::ArpeggioTimingMode::Fixed ? 0 : 1,
+                 0);
     updatingSystemSettingsControls_ = false;
 }
 
@@ -1987,6 +2068,17 @@ void MainWindow::updateDefaultArpeggioIntervalFromControl() {
     }
 }
 
+void MainWindow::updateDefaultArpeggioTimingModeFromControl() {
+    if (updatingSystemSettingsControls_ || !defaultArpeggioTimingCombo_) {
+        return;
+    }
+    const LRESULT selection = SendMessageW(defaultArpeggioTimingCombo_, CB_GETCURSEL, 0, 0);
+    systemSettings_.defaultArpeggioTimingMode = selection == 1
+        ? playback::ArpeggioTimingMode::Adaptive
+        : playback::ArpeggioTimingMode::Fixed;
+    saveSystemSettings();
+}
+
 void MainWindow::updateBpmCorrectionFromControl() {
     if (updatingTempoControls_ || !bpmCorrectionCombo_ || activeDocument_ >= documents_.size()) {
         return;
@@ -2013,6 +2105,20 @@ void MainWindow::updateArpeggioIntervalFromControl() {
         end != value && end && *end == L'\0' && parsed > 0 && parsed <= 10000
             ? static_cast<int>(parsed)
             : 0;
+    InvalidateRect(window_, nullptr, FALSE);
+}
+
+void MainWindow::updateArpeggioTimingModeFromControl() {
+    if (updatingTempoControls_ || !arpeggioTimingCombo_ ||
+        activeDocument_ >= documents_.size()) {
+        return;
+    }
+    const LRESULT selection = SendMessageW(arpeggioTimingCombo_, CB_GETCURSEL, 0, 0);
+    documents_[activeDocument_].arpeggioTimingMode = selection == 1
+        ? playback::ArpeggioTimingMode::Adaptive
+        : playback::ArpeggioTimingMode::Fixed;
+    EnableWindow(arpeggioIntervalEdit_, selection != 1 && !playbackRunning_);
+    setStatus(selection == 1 ? L"琵琶音方式：自适应" : L"琵琶音方式：固定速度");
     InvalidateRect(window_, nullptr, FALSE);
 }
 
@@ -2118,10 +2224,12 @@ void MainWindow::newDocument() {
     tab.bpmText = systemSettings_.defaultBpmText;
     tab.bpmCorrection = systemSettings_.defaultBpmCorrection;
     tab.arpeggioIntervalMs = systemSettings_.defaultArpeggioIntervalMs;
+    tab.arpeggioTimingMode = systemSettings_.defaultArpeggioTimingMode;
     tab.displayName = (tab.kind == DocumentKind::Composition ? L"未命名创作 " : L"未命名 ") +
                       std::to_wstring(untitledCounter_++);
     tab.savedText = serializedDocument(tab);
     documents_.push_back(std::move(tab));
+    refreshPreparedScore(documents_.size() - 1, false);
     setActiveDocument(documents_.size() - 1);
     setStatus(tab.kind == DocumentKind::Composition
                   ? L"已新建双手乐谱；R 为右手、L 为左手，选择任意拍位即可输入"
@@ -2156,6 +2264,7 @@ void MainWindow::openDocument() {
     tab.bpmText = systemSettings_.defaultBpmText;
     tab.bpmCorrection = systemSettings_.defaultBpmCorrection;
     tab.arpeggioIntervalMs = systemSettings_.defaultArpeggioIntervalMs;
+    tab.arpeggioTimingMode = systemSettings_.defaultArpeggioTimingMode;
     if (tab.kind == DocumentKind::Composition) {
         tab.composition = ui::CompositionDocument::fromText(text);
     } else {
@@ -2165,6 +2274,7 @@ void MainWindow::openDocument() {
     tab.displayName = fileNameFor(normalized);
     tab.savedText = serializedDocument(tab);
     documents_.push_back(std::move(tab));
+    refreshPreparedScore(documents_.size() - 1, false);
     setActiveDocument(documents_.size() - 1);
     setStatus(L"乐谱已载入内存；编辑不会改动源文件，直到执行保存");
 }
@@ -2230,10 +2340,34 @@ bool MainWindow::writeDocument(std::size_t index, const std::filesystem::path& p
     documents_[index].displayName = fileNameFor(path);
     documents_[index].savedText = content;
     documents_[index].modified = false;
+    refreshPreparedScore(index, false);
     updateWindowTitle();
     setStatus(L"已保存到 " + documents_[index].path->wstring());
     InvalidateRect(window_, nullptr, FALSE);
     return true;
+}
+
+bool MainWindow::refreshPreparedScore(std::size_t index, bool announce) {
+    if (index >= documents_.size()) {
+        return false;
+    }
+    auto& tab = documents_[index];
+    const std::string text = serializedDocument(tab);
+    auto parsed = core::ScoreParser::parseText(text);
+    tab.preparedScore = std::move(parsed.score);
+    tab.preparedScoreText = text;
+    if (announce) {
+        std::size_t arpeggioCount = 0;
+        for (const auto& tick : tab.preparedScore->ticks()) {
+            if (tick && tick->style == core::PlayStyle::Arpeggio) {
+                ++arpeggioCount;
+            }
+        }
+        setStatus(L"已刷新琵琶音预读映射（" + std::to_wstring(arpeggioCount) +
+                  L" 个琵琶音）");
+        InvalidateRect(window_, nullptr, FALSE);
+    }
+    return parsed.success;
 }
 
 bool MainWindow::confirmClose(std::size_t index) {
@@ -2390,7 +2524,7 @@ std::size_t MainWindow::activeScoreTickCount() const {
     if (activeDocument_ >= documents_.size()) {
         return 1;
     }
-    const auto& tab = documents_[activeDocument_];
+    auto& tab = documents_[activeDocument_];
     const std::size_t scoreTicks = (tab.kind == DocumentKind::Composition
         ? std::max(tab.composition.right().measureCount(), tab.composition.left().measureCount())
         : tab.document.measureCount()) * ui::kBeatsPerMeasure;
@@ -2442,8 +2576,9 @@ void MainWindow::startPlayback(std::size_t tickIndex) {
         SetFocus(bpmEdit_);
         return;
     }
+    const auto& tab = documents_[activeDocument_];
     const int pipaInterval = arpeggioIntervalMs();
-    if (pipaInterval <= 0) {
+    if (tab.arpeggioTimingMode == playback::ArpeggioTimingMode::Fixed && pipaInterval <= 0) {
         setStatus(L"请输入 1 到 10000 之间的琵琶音间隔（毫秒）");
         if (!tempoPanelExpanded_) {
             tempoPanelExpanded_ = true;
@@ -2453,18 +2588,23 @@ void MainWindow::startPlayback(std::size_t tickIndex) {
         return;
     }
 
-    const auto& tab = documents_[activeDocument_];
     const std::string playbackText = tab.kind == DocumentKind::Composition
         ? tab.composition.mergedScore().toText()
         : tab.document.toText();
-    auto parseResult = core::ScoreParser::parseText(playbackText);
-    if (!parseResult.success || !parseResult.score.hasNotes()) {
+    // A manual Ctrl+D/open/save creates this cache. Edits invalidate it by
+    // changing the serialized text; refresh lazily here as a safe fallback so
+    // playback can never use timing from an older score revision.
+    if (!tab.preparedScore || tab.preparedScoreText != playbackText) {
+        refreshPreparedScore(activeDocument_, false);
+    }
+    if (!tab.preparedScore || !tab.preparedScore->hasNotes()) {
         setStatus(L"当前乐谱没有可播放的音符");
         return;
     }
+    const auto& preparedScore = *tab.preparedScore;
 
     const std::size_t requestedTick = tickIndex;
-    transportTotalTicks_ = parseResult.score.playbackTickCount();
+    transportTotalTicks_ = preparedScore.playbackTickCount();
     if (transportTotalTicks_ == 0) {
         return;
     }
@@ -2483,16 +2623,16 @@ void MainWindow::startPlayback(std::size_t tickIndex) {
     tickIndex = requestedTick;
 
     bool hasRemainingNote = false;
-    for (std::size_t index = tickIndex; index < parseResult.score.tickCount(); ++index) {
-        if (parseResult.score.ticks()[index]) {
+    for (std::size_t index = tickIndex; index < preparedScore.tickCount(); ++index) {
+        if (preparedScore.ticks()[index]) {
             hasRemainingNote = true;
             break;
         }
     }
     if (!hasRemainingNote) {
-        const std::size_t precedingCount = std::min(tickIndex, parseResult.score.tickCount());
+        const std::size_t precedingCount = std::min(tickIndex, preparedScore.tickCount());
         for (std::size_t index = 0; index < precedingCount; ++index) {
-            const auto& event = parseResult.score.ticks()[index];
+            const auto& event = preparedScore.ticks()[index];
             if (event && event->style == core::PlayStyle::Hold &&
                 index + std::max<std::size_t>(1, event->holdTicks) > tickIndex) {
                 hasRemainingNote = true;
@@ -2540,13 +2680,15 @@ void MainWindow::startPlayback(std::size_t tickIndex) {
     EnableWindow(bpmEdit_, FALSE);
     EnableWindow(bpmCorrectionCombo_, FALSE);
     EnableWindow(arpeggioIntervalEdit_, FALSE);
+    EnableWindow(arpeggioTimingCombo_, FALSE);
     playbackRunning_ = true;
     const std::uint64_t generation = ++playbackGeneration_;
     playback::PlaybackOptions options;
     options.bpm = bpm;
     options.startTick = tickIndex;
     options.arpeggioStepInterval = std::chrono::milliseconds(pipaInterval);
-    core::Score score = std::move(parseResult.score);
+    options.arpeggioTimingMode = tab.arpeggioTimingMode;
+    core::Score score = preparedScore;
 
     playbackThread_ = std::jthread(
         [this, generation, keySender = std::move(keySender), score = std::move(score), options](
@@ -2588,7 +2730,12 @@ void MainWindow::stopPlayback(bool unlockEditor, bool restoreCompositionSelectio
             EnableWindow(bpmCorrectionCombo_, TRUE);
         }
         if (arpeggioIntervalEdit_) {
-            EnableWindow(arpeggioIntervalEdit_, TRUE);
+            EnableWindow(arpeggioIntervalEdit_, activeDocument_ < documents_.size() &&
+                                                  documents_[activeDocument_].arpeggioTimingMode ==
+                                                      playback::ArpeggioTimingMode::Fixed);
+        }
+        if (arpeggioTimingCombo_) {
+            EnableWindow(arpeggioTimingCombo_, TRUE);
         }
         InvalidateRect(window_, nullptr, FALSE);
     }
@@ -2689,7 +2836,10 @@ void MainWindow::handlePlaybackComplete(std::uint64_t generation, int status) {
     editor_.setPlaybackActive(false);
     EnableWindow(bpmEdit_, TRUE);
     EnableWindow(bpmCorrectionCombo_, TRUE);
-    EnableWindow(arpeggioIntervalEdit_, TRUE);
+    EnableWindow(arpeggioIntervalEdit_, activeDocument_ < documents_.size() &&
+                                          documents_[activeDocument_].arpeggioTimingMode ==
+                                              playback::ArpeggioTimingMode::Fixed);
+    EnableWindow(arpeggioTimingCombo_, TRUE);
     if (status == static_cast<int>(playback::PlaybackStatus::Completed)) {
         transportTick_ = transportTotalTicks_;
         if (transportTotalTicks_ > 0) {

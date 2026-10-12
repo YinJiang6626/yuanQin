@@ -52,6 +52,10 @@ std::string playableNotes(std::string_view value) {
     return notes;
 }
 
+bool containsArpeggioStop(std::string_view value) {
+    return value.find('|') != std::string_view::npos;
+}
+
 std::vector<std::string> pipaSteps(const std::string& value) {
     std::vector<std::string> result;
     if (!isPipa(value)) {
@@ -98,10 +102,14 @@ std::string combineEvents(const std::string& first, const std::string& second) {
             notes.push_back(note);
         }
     }
+    const bool hasStopMarker = containsArpeggioStop(first) || containsArpeggioStop(second);
     if (notes.empty()) {
-        return {};
+        return hasStopMarker ? "|" : std::string{};
     }
-    return notes.size() == 1 ? notes : "(" + notes + ")";
+    if (!hasStopMarker) {
+        return notes.size() == 1 ? notes : "(" + notes + ")";
+    }
+    return "(|" + notes + ")";
 }
 
 std::string makePipa(const std::vector<std::string>& steps) {

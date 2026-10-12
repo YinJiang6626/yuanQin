@@ -76,6 +76,30 @@ int main() {
                 typedHold.beat(0, 0) == "{W-}",
             "a long hold can be created as an editable cell");
 
+    const auto embeddedHold = ScoreDocument::fromText("({w--}a)/");
+    require(embeddedHold.beat(0, 0) == "({W--}A)" &&
+                embeddedHold.toText() == "({W--}A)   /",
+            "the editor preserves a long hold embedded in a chord");
+    ScoreDocument typedEmbeddedHold;
+    typedEmbeddedHold.beginGroup(0, 0, '(');
+    std::size_t embeddedCaret = 1;
+    require(typedEmbeddedHold.insertEmbeddedHold(0, 0, embeddedCaret) &&
+                typedEmbeddedHold.insertGroupNote(0, 0, embeddedCaret, 'w') &&
+                typedEmbeddedHold.insertHoldDash(0, 0, embeddedCaret) &&
+                typedEmbeddedHold.beat(0, 0) == "({W-})",
+            "a long hold can be inserted while editing a chord");
+
+    const auto stopMarker = ScoreDocument::fromText("[AS](|w)| /");
+    require(stopMarker.beat(0, 1) == "(|W)" && stopMarker.beat(0, 2) == "|",
+            "the editor preserves standalone and chord-attached pipa stop markers");
+    ScoreDocument typedStopMarker;
+    typedStopMarker.beginGroup(0, 0, '(');
+    std::size_t markerCaret = 1;
+    require(typedStopMarker.insertGroupStopMarker(0, 0, markerCaret) &&
+                typedStopMarker.insertGroupNote(0, 0, markerCaret, 'a') &&
+                typedStopMarker.beat(0, 0) == "(|A)",
+            "a stop marker can be typed together with a chord");
+
     ScoreDocument groupBackspace;
     groupBackspace.beginGroup(0, 0, '(');
     std::size_t groupCaret = 1;

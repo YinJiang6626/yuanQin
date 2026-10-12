@@ -19,8 +19,14 @@ std::size_t Score::playbackTickCount() const noexcept {
     std::size_t result = ticks_.size();
     for (std::size_t index = 0; index < ticks_.size(); ++index) {
         const auto& tick = ticks_[index];
-        if (tick && tick->style == PlayStyle::Hold) {
+        if (!tick) {
+            continue;
+        }
+        if (tick->style == PlayStyle::Hold) {
             result = std::max(result, index + std::max<std::size_t>(1, tick->holdTicks));
+        }
+        for (const auto& hold : tick->embeddedHolds) {
+            result = std::max(result, index + std::max<std::size_t>(1, hold.holdTicks));
         }
     }
     return result;
@@ -32,7 +38,7 @@ bool Score::empty() const noexcept {
 
 bool Score::hasNotes() const noexcept {
     for (const auto& tick : ticks_) {
-        if (tick && !tick->notes.empty()) {
+        if (tick && (!tick->notes.empty() || !tick->embeddedHolds.empty())) {
             return true;
         }
     }

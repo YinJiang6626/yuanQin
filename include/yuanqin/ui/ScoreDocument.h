@@ -38,8 +38,12 @@ public:
     void beginGroup(std::size_t measureIndex, std::size_t beatIndex, char opening);
     [[nodiscard]] bool insertGroupNote(std::size_t measureIndex, std::size_t beatIndex,
                                        std::size_t& caretOffset, char note);
+    [[nodiscard]] bool insertGroupStopMarker(std::size_t measureIndex, std::size_t beatIndex,
+                                             std::size_t& caretOffset);
     [[nodiscard]] bool insertHoldDash(std::size_t measureIndex, std::size_t beatIndex,
                                       std::size_t& caretOffset);
+    [[nodiscard]] bool insertEmbeddedHold(std::size_t measureIndex, std::size_t beatIndex,
+                                          std::size_t& caretOffset);
     [[nodiscard]] bool insertPipaChord(std::size_t measureIndex, std::size_t beatIndex,
                                        std::size_t& caretOffset);
     [[nodiscard]] bool eraseGroupCharacterBefore(std::size_t measureIndex,

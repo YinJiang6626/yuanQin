@@ -380,20 +380,21 @@ CMakeFiles/yuanqin_gui.dir/apps/gui/main.cpp.obj: \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/enable_special_members.h \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/node_handle.h \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/erase_if.h \
- C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/filesystem \
- C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/fs_fwd.h \
- C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/system_error \
- C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/x86_64-w64-mingw32/bits/error_constants.h \
- C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/stdexcept \
+ E:/projects_in_progress/yuanQin/include/yuanqin/playback/MusicPlayer.h \
+ E:/projects_in_progress/yuanQin/include/yuanqin/core/Score.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/optional \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/exception \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/exception_ptr.h \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/cxxabi_init_exception.h \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/nested_exception.h \
+ E:/projects_in_progress/yuanQin/include/yuanqin/playback/IKeySender.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/span \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/chrono \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/chrono.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/ratio \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/cstdint \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/lib/gcc/x86_64-w64-mingw32/14.2.0/include/stdint.h \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/x86_64-w64-mingw32/include/stdint.h \
- C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/chrono.h \
- C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/ratio \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/limits \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/ctime \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/x86_64-w64-mingw32/include/time.h \
@@ -401,9 +402,10 @@ CMakeFiles/yuanqin_gui.dir/apps/gui/main.cpp.obj: \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/x86_64-w64-mingw32/include/sec_api/sys/timeb_s.h \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/x86_64-w64-mingw32/include/pthread_time.h \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/parse_numbers.h \
- C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/fs_path.h \
- C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/locale \
- C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/locale_classes.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/sstream \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/istream \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/ios \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/ios_base.h \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/ext/atomicity.h \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/x86_64-w64-mingw32/bits/gthr.h \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/x86_64-w64-mingw32/bits/gthr-default.h \
@@ -416,44 +418,59 @@ CMakeFiles/yuanqin_gui.dir/apps/gui/main.cpp.obj: \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/x86_64-w64-mingw32/include/pthread_compat.h \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/x86_64-w64-mingw32/include/pthread_unistd.h \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/x86_64-w64-mingw32/bits/atomic_word.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/locale_classes.h \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/locale_classes.tcc \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/system_error \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/x86_64-w64-mingw32/bits/error_constants.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/stdexcept \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/streambuf \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/streambuf.tcc \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/basic_ios.h \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/locale_facets.h \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/cwctype \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/x86_64-w64-mingw32/include/wctype.h \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/x86_64-w64-mingw32/bits/ctype_base.h \
- C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/ios_base.h \
- C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/streambuf \
- C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/streambuf.tcc \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/streambuf_iterator.h \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/x86_64-w64-mingw32/bits/ctype_inline.h \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/locale_facets.tcc \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/basic_ios.tcc \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/ostream \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/ostream.tcc \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/istream.tcc \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/sstream.tcc \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/stl_algo.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/algorithmfwd.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/stl_heap.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/uniform_int_dist.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/stl_tempbuf.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/shared_ptr.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/shared_ptr_base.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/allocated_ptr.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/unique_ptr.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/ext/concurrence.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/align.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/chrono_io.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/iomanip \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/locale \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/locale_facets_nonio.h \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/x86_64-w64-mingw32/bits/time_members.h \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/x86_64-w64-mingw32/bits/messages_members.h \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/codecvt.h \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/locale_facets_nonio.tcc \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/locale_conv.h \
- C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/iomanip \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/quoted_string.h \
- C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/sstream \
- C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/istream \
- C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/ios \
- C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/basic_ios.h \
- C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/basic_ios.tcc \
- C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/ostream \
- C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/ostream.tcc \
- C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/istream.tcc \
- C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/sstream.tcc \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/format \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/charconv \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/variant \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/ranges_algobase.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/unicode.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/unicode-data.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/filesystem \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/fs_fwd.h \
+ C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/fs_path.h \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/codecvt \
- C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/ext/concurrence.h \
- C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/shared_ptr.h \
- C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/shared_ptr_base.h \
- C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/allocated_ptr.h \
- C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/unique_ptr.h \
- C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/align.h \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/fs_dir.h \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/bits/fs_ops.h \
- C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/optional \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/thread \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/stop_token \
  C:/Users/kanka/AppData/Local/Programs/mingw-64/winlibs-x86_64-posix-seh-gcc-14.2.0-llvm-18.1.8-mingw-w64ucrt-12.0.0-r1/mingw64/include/c++/14.2.0/atomic \

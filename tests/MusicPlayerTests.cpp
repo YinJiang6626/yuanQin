@@ -124,6 +124,17 @@ int main() {
     require(holdSender.notes == std::vector<char>({'S'}),
             "later score units still play while an earlier note is held");
 
+    RecordingSender embeddedHoldSender;
+    const auto embeddedHoldScore = ScoreParser::parseText("({W--}A)S  /").score;
+    const auto embeddedHoldResult = player.play(embeddedHoldScore, embeddedHoldSender, options);
+    require(embeddedHoldResult.status == PlaybackStatus::Completed,
+            "a chord with an embedded long hold plays to completion");
+    require(embeddedHoldSender.pressed == std::vector<std::vector<char>>{{'W'}} &&
+                embeddedHoldSender.released == std::vector<std::vector<char>>{{'W'}},
+            "the embedded brace note has its own key-down and key-up lifecycle");
+    require(embeddedHoldSender.notes == std::vector<char>({'A', 'S'}),
+            "the other chord note and later tick still play while the embedded note is held");
+
     RecordingSender endingHoldSender;
     std::vector<std::size_t> endingHoldProgress;
     const auto endingHoldScore = ScoreParser::parseText("ABC{W---}/").score;

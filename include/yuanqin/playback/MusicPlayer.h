@@ -9,6 +9,11 @@
 
 namespace yuanqin::playback {
 
+enum class ArpeggioTimingMode {
+    Fixed,
+    Adaptive,
+};
+
 struct PlaybackOptions {
     double bpm{80.0};
     std::chrono::milliseconds startDelay{0};
@@ -17,6 +22,7 @@ struct PlaybackOptions {
     // Each bracketed pipa step is emitted at this fixed interval.  Unlike the
     // score tempo, this is intentionally expressed in real milliseconds.
     std::chrono::milliseconds arpeggioStepInterval{107};
+    ArpeggioTimingMode arpeggioTimingMode{ArpeggioTimingMode::Fixed};
 };
 
 enum class PlaybackStatus {

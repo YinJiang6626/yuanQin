@@ -3,6 +3,7 @@
 #include "yuanqin/ui/ScoreDocument.h"
 #include "yuanqin/ui/CompositionDocument.h"
 #include "yuanqin/ui/ScoreEditor.h"
+#include "yuanqin/playback/MusicPlayer.h"
 
 #include <Windows.h>
 
@@ -44,10 +45,15 @@ private:
         std::optional<std::filesystem::path> path;
         std::wstring displayName;
         std::string savedText;
+        // The parsed score owns the pre-read adaptive pipa timing map for the
+        // current text. It is refreshed on open/save or Ctrl+D.
+        std::optional<core::Score> preparedScore;
+        std::string preparedScoreText;
         std::wstring bpmText{L"80"};
         int bpmCorrection{1};
         // 4 minimum units at BPM 80 last 750 ms; 750 / 7 rounds to 107 ms.
         int arpeggioIntervalMs{107};
+        playback::ArpeggioTimingMode arpeggioTimingMode{playback::ArpeggioTimingMode::Fixed};
         ui::ScoreEditor::Hand activeHand{ui::ScoreEditor::Hand::Right};
         std::size_t selectionAnchor{};
         std::size_t selectionCaret{};
@@ -77,6 +83,7 @@ private:
         TempoSettingLayout bpm;
         TempoSettingLayout correction;
         TempoSettingLayout arpeggio;
+        TempoSettingLayout arpeggioTiming;
         int contentHeight{};
     };
 
@@ -85,6 +92,8 @@ private:
         std::wstring defaultBpmText{L"80"};
         int defaultBpmCorrection{1};
         int defaultArpeggioIntervalMs{107};
+        playback::ArpeggioTimingMode defaultArpeggioTimingMode{
+            playback::ArpeggioTimingMode::Fixed};
     };
 
     static LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wParam,
@@ -106,8 +115,10 @@ private:
     void updateDefaultBpmFromControl();
     void updateDefaultBpmCorrectionFromControl();
     void updateDefaultArpeggioIntervalFromControl();
+    void updateDefaultArpeggioTimingModeFromControl();
     void updateBpmCorrectionFromControl();
     void updateArpeggioIntervalFromControl();
+    void updateArpeggioTimingModeFromControl();
     void recordActiveDocumentHistory();
     void undoActiveDocument();
     void redoActiveDocument();
@@ -124,6 +135,7 @@ private:
     bool saveDocumentAs(std::size_t index);
     bool exportCompositionAsText(std::size_t index);
     bool writeDocument(std::size_t index, const std::filesystem::path& path);
+    bool refreshPreparedScore(std::size_t index, bool announce);
     bool confirmClose(std::size_t index);
     void closeDocument(std::size_t index);
     void reorderDocument(std::size_t from, std::size_t target);
@@ -191,10 +203,12 @@ private:
     HWND bpmEdit_{nullptr};
     HWND bpmCorrectionCombo_{nullptr};
     HWND arpeggioIntervalEdit_{nullptr};
+    HWND arpeggioTimingCombo_{nullptr};
     HWND outputBackendCombo_{nullptr};
     HWND defaultBpmEdit_{nullptr};
     HWND defaultBpmCorrectionCombo_{nullptr};
     HWND defaultArpeggioIntervalEdit_{nullptr};
+    HWND defaultArpeggioTimingCombo_{nullptr};
     HBRUSH bpmEditBrush_{nullptr};
     ui::ScoreEditor editor_;
     std::vector<DocumentTab> documents_;

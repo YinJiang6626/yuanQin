@@ -107,13 +107,14 @@ struct PendingArpeggio {
     std::vector<std::vector<char>> steps;
     std::size_t nextStep{};
     std::chrono::steady_clock::time_point nextStepTime;
-    std::chrono::milliseconds interval{};
+    std::chrono::steady_clock::duration interval{};
+    std::chrono::steady_clock::time_point endTime;
 };
 
 class ArpeggioManager {
 public:
     void begin(const core::NoteEvent& event, std::chrono::steady_clock::time_point startTime,
-               std::chrono::milliseconds interval) {
+               std::chrono::steady_clock::duration interval) {
         PendingArpeggio arpeggio;
         arpeggio.steps = event.arpeggioSteps;
         if (arpeggio.steps.empty()) {
@@ -123,7 +124,8 @@ public:
             }
         }
         arpeggio.nextStepTime = startTime;
-        arpeggio.interval = std::max(interval, std::chrono::milliseconds::zero());
+        arpeggio.interval = std::max(interval, std::chrono::steady_clock::duration::zero());
+        arpeggio.endTime = startTime + arpeggio.interval * arpeggio.steps.size();
         if (!arpeggio.steps.empty()) {
             arpeggios_.push_back(std::move(arpeggio));
         }
@@ -141,7 +143,7 @@ public:
                 ++iterator->nextStep;
                 iterator->nextStepTime += iterator->interval;
             }
-            if (iterator->nextStep == iterator->steps.size()) {
+            if (iterator->nextStep == iterator->steps.size() && now >= iterator->endTime) {
                 iterator = arpeggios_.erase(iterator);
             } else {
                 ++iterator;
@@ -153,7 +155,8 @@ public:
     [[nodiscard]] std::chrono::steady_clock::time_point nextStepTime() const {
         auto result = std::chrono::steady_clock::time_point::max();
         for (const auto& arpeggio : arpeggios_) {
-            result = std::min(result, arpeggio.nextStepTime);
+            result = std::min(result, arpeggio.nextStep < arpeggio.steps.size()
+                                           ? arpeggio.nextStepTime : arpeggio.endTime);
         }
         return result;
     }
@@ -213,6 +216,15 @@ PlaybackResult MusicPlayer::play(const core::Score& score, IKeySender& sender,
     HoldManager holds;
     ArpeggioManager arpeggios;
 
+    const auto beginHold = [&](std::span<const char> notes, std::size_t holdTicks,
+                               std::chrono::steady_clock::time_point holdStart) {
+        const auto duration = tickDuration * static_cast<double>(
+            std::max<std::size_t>(1, holdTicks));
+        const auto releaseTime = holdStart +
+            std::chrono::duration_cast<std::chrono::steady_clock::duration>(duration);
+        return holds.begin(sender, notes, releaseTime);
+    };
+
     const auto waitFor = [&](std::chrono::steady_clock::time_point time,
                              std::size_t tickIndex) -> std::optional<PlaybackResult> {
         const auto result = waitUntil(time, shouldCancel, sender, holds, arpeggios);
@@ -235,18 +247,27 @@ PlaybackResult MusicPlayer::play(const core::Score& score, IKeySender& sender,
         }
         for (std::size_t index = 0; index < sourceStartTick; ++index) {
             const auto& tick = score.ticks()[index];
-            if (!tick || tick->style != core::PlayStyle::Hold) {
+            if (!tick) {
                 continue;
             }
-            const std::size_t holdEndTick = index + std::max<std::size_t>(1, tick->holdTicks);
-            if (holdEndTick <= startTick) {
-                continue;
-            }
-            const auto remaining = tickDuration * static_cast<double>(holdEndTick - startTick);
-            const auto releaseTime = startTime +
-                std::chrono::duration_cast<std::chrono::steady_clock::duration>(remaining);
-            if (!holds.begin(sender, tick->notes, releaseTime)) {
+            const auto restoreHold = [&](std::span<const char> notes, std::size_t holdTicks) {
+                const std::size_t holdEndTick = index + std::max<std::size_t>(1, holdTicks);
+                if (holdEndTick <= startTick) {
+                    return true;
+                }
+                const auto remaining = tickDuration * static_cast<double>(holdEndTick - startTick);
+                const auto releaseTime = startTime +
+                    std::chrono::duration_cast<std::chrono::steady_clock::duration>(remaining);
+                return holds.begin(sender, notes, releaseTime);
+            };
+            if (tick->style == core::PlayStyle::Hold &&
+                !restoreHold(tick->notes, tick->holdTicks)) {
                 return {PlaybackStatus::SendFailed, startTick};
+            }
+            for (const auto& hold : tick->embeddedHolds) {
+                if (!restoreHold(hold.notes, hold.holdTicks)) {
+                    return {PlaybackStatus::SendFailed, startTick};
+                }
             }
         }
     }
@@ -272,6 +293,11 @@ PlaybackResult MusicPlayer::play(const core::Score& score, IKeySender& sender,
             if (cancelled(shouldCancel)) {
                 return {PlaybackStatus::Cancelled, tickIndex};
             }
+            for (const auto& hold : event.embeddedHolds) {
+                if (!beginHold(hold.notes, hold.holdTicks, nextTickTime)) {
+                    return {PlaybackStatus::SendFailed, tickIndex};
+                }
+            }
             const auto notes = holds.withoutHeld(event.notes);
             if (!notes.empty() && !sender.sendChord(notes)) {
                 return {PlaybackStatus::SendFailed, tickIndex};
@@ -285,10 +311,7 @@ PlaybackResult MusicPlayer::play(const core::Score& score, IKeySender& sender,
             if (cancelled(shouldCancel)) {
                 return {PlaybackStatus::Cancelled, tickIndex};
             }
-            const auto duration = tickDuration * static_cast<double>(std::max<std::size_t>(1, event.holdTicks));
-            const auto releaseTime = nextTickTime +
-                std::chrono::duration_cast<std::chrono::steady_clock::duration>(duration);
-            if (!holds.begin(sender, event.notes, releaseTime)) {
+            if (!beginHold(event.notes, event.holdTicks, nextTickTime)) {
                 return {PlaybackStatus::SendFailed, tickIndex};
             }
             ++tickIndex;
@@ -298,7 +321,17 @@ PlaybackResult MusicPlayer::play(const core::Score& score, IKeySender& sender,
 
         // A pipa/arpeggio is an independent timed stream. Its following steps
         // are dispatched while later score cells retain their normal tempo.
-        arpeggios.begin(event, nextTickTime, options.arpeggioStepInterval);
+        const std::size_t stepCount = event.arpeggioSteps.empty()
+            ? event.notes.size() : event.arpeggioSteps.size();
+        auto arpeggioInterval = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+            std::max(options.arpeggioStepInterval, std::chrono::milliseconds::zero()));
+        if (options.arpeggioTimingMode == ArpeggioTimingMode::Adaptive && stepCount > 0) {
+            const auto span = tickDuration * static_cast<double>(
+                std::max<std::size_t>(1, event.adaptiveArpeggioSpanTicks));
+            arpeggioInterval = std::chrono::duration_cast<std::chrono::steady_clock::duration>(span) /
+                static_cast<std::chrono::steady_clock::duration::rep>(stepCount);
+        }
+        arpeggios.begin(event, nextTickTime, arpeggioInterval);
         if (!arpeggios.playDue(sender, holds, std::chrono::steady_clock::now())) {
             return {PlaybackStatus::SendFailed, tickIndex};
         }
