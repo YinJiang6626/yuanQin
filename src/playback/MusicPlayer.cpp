@@ -321,6 +321,11 @@ PlaybackResult MusicPlayer::play(const core::Score& score, IKeySender& sender,
 
         // A pipa/arpeggio is an independent timed stream. Its following steps
         // are dispatched while later score cells retain their normal tempo.
+        for (const auto& hold : event.embeddedHolds) {
+            if (!beginHold(hold.notes, hold.holdTicks, nextTickTime)) {
+                return {PlaybackStatus::SendFailed, tickIndex};
+            }
+        }
         const std::size_t stepCount = event.arpeggioSteps.empty()
             ? event.notes.size() : event.arpeggioSteps.size();
         auto arpeggioInterval = std::chrono::duration_cast<std::chrono::steady_clock::duration>(

@@ -65,6 +65,28 @@ int main() {
     require(typedNested.beat(0, 0) == "[(AS)]",
             "nested pipa chord typing preserves its delimiters");
 
+    const auto pipaWithHold = ScoreDocument::fromText("[{a---}qwer]/");
+    require(pipaWithHold.beat(0, 0) == "[{A---}QWER]" &&
+                pipaWithHold.toText() == "[{A---}QWER]   /",
+            "the editor preserves a pipa with an embedded long hold");
+    const auto pipaChordWithHold = ScoreDocument::fromText("[({a---}q)wer]/");
+    require(pipaChordWithHold.beat(0, 0) == "[({A---}Q)WER]",
+            "a pipa chord continues to preserve a nested long hold");
+    ScoreDocument typedPipaChordWithHold;
+    typedPipaChordWithHold.beginGroup(0, 0, '[');
+    std::size_t pipaChordCaret = 1;
+    require(typedPipaChordWithHold.insertPipaChord(0, 0, pipaChordCaret) &&
+                typedPipaChordWithHold.insertEmbeddedHold(0, 0, pipaChordCaret) &&
+                typedPipaChordWithHold.insertGroupNote(0, 0, pipaChordCaret, 'w') &&
+                typedPipaChordWithHold.insertHoldDash(0, 0, pipaChordCaret) &&
+                typedPipaChordWithHold.beat(0, 0) == "[({W-})]",
+            "a pipa's parenthesized step accepts an editable nested long hold");
+
+    const auto parallelGroups = ScoreDocument::fromText("({W--}[ASDF])/");
+    require(parallelGroups.beat(0, 0) == "({W--}[ASDF])" &&
+                parallelGroups.toText() == "({W--}[ASDF])   /",
+            "nested parallel pipa and hold groups survive document load and save");
+
     const auto loadedHold = ScoreDocument::fromText("{(as)--}Q  /");
     require(loadedHold.beat(0, 0) == "{(AS)--}" && loadedHold.toText() == "{(AS)--}Q  /",
             "the editor preserves long-hold notation while loading and saving");
@@ -88,6 +110,14 @@ int main() {
                 typedEmbeddedHold.insertHoldDash(0, 0, embeddedCaret) &&
                 typedEmbeddedHold.beat(0, 0) == "({W-})",
             "a long hold can be inserted while editing a chord");
+    ScoreDocument typedParallelGroup;
+    typedParallelGroup.beginGroup(0, 0, '(');
+    std::size_t parallelCaret = 1;
+    require(typedParallelGroup.insertEmbeddedPipa(0, 0, parallelCaret) &&
+                typedParallelGroup.insertGroupNote(0, 0, parallelCaret, 'a') &&
+                typedParallelGroup.insertGroupNote(0, 0, parallelCaret, 's') &&
+                typedParallelGroup.beat(0, 0) == "([AS])",
+            "a parenthesized group accepts an editable embedded pipa");
 
     const auto stopMarker = ScoreDocument::fromText("[AS](|w)| /");
     require(stopMarker.beat(0, 1) == "(|W)" && stopMarker.beat(0, 2) == "|",

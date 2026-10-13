@@ -14,23 +14,73 @@ char normalize(char value) noexcept {
     return static_cast<char>(std::toupper(static_cast<unsigned char>(value)));
 }
 
-// Appends one complete {note---} expression while preserving its optional
-// inner chord. `index` must point at the opening brace on entry.
-void appendHold(std::string_view source, std::size_t& index, std::string& target) {
-    target.push_back('{');
-    ++index;
-    while (index < source.size() && source[index] != '}') {
-        const char current = source[index++];
-        if (core::ScoreParser::isPlayableNote(current)) {
-            target.push_back(normalize(current));
-        } else if (current == '-' || current == '(' || current == ')') {
-            target.push_back(current);
+char closingFor(char opening) noexcept {
+    switch (opening) {
+        case '(': return ')';
+        case '[': return ']';
+        case '{': return '}';
+        default: return '\0';
+    }
+}
+
+// Returns the innermost still-open group at an insertion position.  The
+// editor uses it to distinguish a pipa's `()` step from the pipa's `[]`
+// container: `{}` is valid in the former, but a second `[]` is not.
+char groupAtCaret(std::string_view value, std::size_t caretOffset) {
+    std::vector<char> stack;
+    caretOffset = std::min(caretOffset, value.size());
+    for (std::size_t index = 0; index < caretOffset; ++index) {
+        const char current = value[index];
+        if (current == '(' || current == '[' || current == '{') {
+            stack.push_back(current);
+        } else if (!stack.empty() && current == closingFor(stack.back())) {
+            stack.pop_back();
         }
     }
-    if (index < source.size() && source[index] == '}') {
+    return stack.empty() ? '\0' : stack.back();
+}
+
+// Keep nested parallel notation intact when the UI loads, saves, or moves a
+// cell.  In particular, two-hand merging may produce `({W--}[ASDF])` and
+// `((QW)[ASDF])`; flattening those forms would change their playback meaning.
+// `index` points to an opening delimiter on entry.
+void appendSanitizedGroup(std::string_view source, std::size_t& index, std::string& target) {
+    const char opening = source[index++];
+    const char closing = closingFor(opening);
+    target.push_back(opening);
+
+    while (index < source.size() && source[index] != closing) {
+        const char current = source[index];
+        if (core::ScoreParser::isPlayableNote(current)) {
+            target.push_back(normalize(current));
+            ++index;
+            continue;
+        }
+        if (current == '-' && opening == '{') {
+            target.push_back(current);
+            ++index;
+            continue;
+        }
+        if (current == '|' && opening == '(') {
+            target.push_back(current);
+            ++index;
+            continue;
+        }
+
+        const bool nested = current == '(' || current == '[' || current == '{';
+        const bool allowed = nested &&
+            (opening == '(' || (opening == '[' && (current == '(' || current == '{')) ||
+             (opening == '{' && current == '('));
+        if (allowed) {
+            appendSanitizedGroup(source, index, target);
+            continue;
+        }
         ++index;
     }
-    target.push_back('}');
+    if (index < source.size() && source[index] == closing) {
+        ++index;
+    }
+    target.push_back(closing);
 }
 
 EditableMeasure parseMeasure(std::string_view source) {
@@ -48,63 +98,10 @@ EditableMeasure parseMeasure(std::string_view source) {
             continue;
         }
 
-        if (value == '(') {
-            std::string group(1, value);
-            while (index < source.size() && source[index] != ')') {
-                if (source[index] == '{') {
-                    appendHold(source, index, group);
-                    continue;
-                }
-                const char current = source[index++];
-                if (core::ScoreParser::isPlayableNote(current)) {
-                    group.push_back(normalize(current));
-                } else if (current == '|') {
-                    group.push_back('|');
-                }
-            }
-            if (index < source.size() && source[index] == ')') {
-                ++index;
-            }
-            group.push_back(')');
-            result.beats[beatIndex++] = std::move(group);
-            continue;
-        }
-
-        if (value == '[') {
-            std::string group("[");
-            while (index < source.size() && source[index] != ']') {
-                const char current = source[index++];
-                if (current == '(') {
-                    std::string chord("(");
-                    while (index < source.size() && source[index] != ')') {
-                        if (core::ScoreParser::isPlayableNote(source[index])) {
-                            chord.push_back(normalize(source[index]));
-                        }
-                        ++index;
-                    }
-                    if (index < source.size() && source[index] == ')') {
-                        ++index;
-                    }
-                    if (chord.size() > 1) {
-                        chord.push_back(')');
-                        group += chord;
-                    }
-                } else if (core::ScoreParser::isPlayableNote(current)) {
-                    group.push_back(normalize(current));
-                }
-            }
-            if (index < source.size() && source[index] == ']') {
-                ++index;
-            }
-            group.push_back(']');
-            result.beats[beatIndex++] = std::move(group);
-            continue;
-        }
-
-        if (value == '{') {
+        if (value == '(' || value == '[' || value == '{') {
             std::string group;
             --index;
-            appendHold(source, index, group);
+            appendSanitizedGroup(source, index, group);
             result.beats[beatIndex++] = std::move(group);
             continue;
         }
@@ -129,58 +126,10 @@ std::string sanitizeBeat(std::string_view value) {
     }
 
     const char first = value.front();
-    if (first == '(') {
-        std::string result("(");
-        for (std::size_t index = 1; index < value.size() && value[index] != ')';) {
-            if (value[index] == '{') {
-                appendHold(value, index, result);
-                continue;
-            }
-            const char current = value[index++];
-            if (core::ScoreParser::isPlayableNote(current)) {
-                result.push_back(normalize(current));
-            } else if (current == '|') {
-                result.push_back('|');
-            }
-        }
-        result.push_back(')');
-        return result;
-    }
-
-    if (first == '[') {
-        std::string result("[");
-        for (std::size_t index = 1; index < value.size() && value[index] != ']'; ++index) {
-            const char current = value[index];
-            if (current == '(') {
-                std::string chord("(");
-                while (++index < value.size() && value[index] != ')') {
-                    if (core::ScoreParser::isPlayableNote(value[index])) {
-                        chord.push_back(normalize(value[index]));
-                    }
-                }
-                if (chord.size() > 1) {
-                    chord.push_back(')');
-                    result += chord;
-                }
-            } else if (core::ScoreParser::isPlayableNote(current)) {
-                result.push_back(normalize(current));
-            }
-        }
-        result.push_back(']');
-        return result;
-    }
-
-    if (first == '{') {
-        std::string result("{");
-        for (std::size_t index = 1; index < value.size() && value[index] != '}'; ++index) {
-            const char current = value[index];
-            if (core::ScoreParser::isPlayableNote(current)) {
-                result.push_back(normalize(current));
-            } else if (current == '-' || current == '(' || current == ')') {
-                result.push_back(current);
-            }
-        }
-        result.push_back('}');
+    if (first == '(' || first == '[' || first == '{') {
+        std::string result;
+        std::size_t index = 0;
+        appendSanitizedGroup(value, index, result);
         return result;
     }
 
@@ -364,11 +313,36 @@ bool ScoreDocument::insertEmbeddedHold(std::size_t measureIndex, std::size_t bea
         return false;
     }
     auto& value = measures_[measureIndex].beats[beatIndex];
+    if (value.size() < 2 ||
+        !((value.front() == '(' && value.back() == ')') ||
+          (value.front() == '[' && value.back() == ']'))) {
+        return false;
+    }
+    caretOffset = std::clamp(caretOffset, std::size_t{1}, value.size() - 1);
+    // A direct pipa body does not accept `{}`. It becomes available only
+    // after the user has opened the pipa's inner chord, e.g. `[({W--}A)S]`.
+    if (groupAtCaret(value, caretOffset) != '(') {
+        return false;
+    }
+    value.insert(caretOffset, "{}");
+    ++caretOffset;
+    return true;
+}
+
+bool ScoreDocument::insertEmbeddedPipa(std::size_t measureIndex, std::size_t beatIndex,
+                                       std::size_t& caretOffset) {
+    if (measureIndex >= measures_.size() || beatIndex >= kBeatsPerMeasure) {
+        return false;
+    }
+    auto& value = measures_[measureIndex].beats[beatIndex];
     if (value.size() < 2 || value.front() != '(' || value.back() != ')') {
         return false;
     }
     caretOffset = std::clamp(caretOffset, std::size_t{1}, value.size() - 1);
-    value.insert(caretOffset, "{}");
+    if (groupAtCaret(value, caretOffset) != '(') {
+        return false;
+    }
+    value.insert(caretOffset, "[]");
     ++caretOffset;
     return true;
 }

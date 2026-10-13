@@ -1167,7 +1167,8 @@ void ScoreEditor::beginGroup(char opening) {
     }
     const auto& value = document->beat(selectedMeasure_, selectedBeat_);
     if (opening == '{' && !hasSelection() && value.size() >= 2 &&
-        value.front() == '(' && value.back() == ')' && groupEditing_) {
+        ((value.front() == '(' && value.back() == ')') ||
+         (value.front() == '[' && value.back() == ']')) && groupEditing_) {
         notifyBeforeChange();
         if (document->insertEmbeddedHold(selectedMeasure_, selectedBeat_, groupCaretOffset_)) {
             notifyChanged();
@@ -1176,6 +1177,23 @@ void ScoreEditor::beginGroup(char opening) {
             }
             return;
         }
+    }
+    if (opening == '[' && !hasSelection() && value.size() >= 2 &&
+        value.front() == '(' && value.back() == ')' && groupEditing_) {
+        notifyBeforeChange();
+        if (document->insertEmbeddedPipa(selectedMeasure_, selectedBeat_, groupCaretOffset_)) {
+            notifyChanged();
+            if (window_) {
+                InvalidateRect(window_, nullptr, FALSE);
+            }
+            return;
+        }
+    }
+    if (opening == '[' && !hasSelection() && value.size() >= 2 &&
+        value.front() == '[' && value.back() == ']' && groupEditing_) {
+        // Pipa notation has no nested `[]` form. Keep the cell intact rather
+        // than replacing it with a new empty pipa group.
+        return;
     }
     if (opening == '(' && !hasSelection() && value.size() >= 2 &&
         (value.front() == '[' || value.front() == '{') &&
@@ -1350,7 +1368,7 @@ std::vector<std::string> ScoreEditor::clipboardBeats() const {
             const char closing = value == '(' ? ')' : (value == '[' ? ']' : '}');
             std::string group(1, value);
             while (index < text.size() && text[index] != closing) {
-                if (value == '(' && text[index] == '{') {
+                if ((value == '(' || value == '[') && text[index] == '{') {
                     group.push_back(text[index++]);
                     while (index < text.size() && text[index] != '}') {
                         const char holdValue = text[index++];

@@ -135,6 +135,41 @@ int main() {
     require(embeddedHoldSender.notes == std::vector<char>({'A', 'S'}),
             "the other chord note and later tick still play while the embedded note is held");
 
+    RecordingSender pipaWithHoldSender;
+    const auto pipaWithHoldScore = ScoreParser::parseText("[{A-}SW]  /").score;
+    const auto pipaWithHoldResult = player.play(pipaWithHoldScore, pipaWithHoldSender, options);
+    require(pipaWithHoldResult.status == PlaybackStatus::Completed,
+            "a pipa and long hold in the same cell play to completion");
+    require(pipaWithHoldSender.pressed == std::vector<std::vector<char>>{{'A'}} &&
+                pipaWithHoldSender.released == std::vector<std::vector<char>>{{'A'}} &&
+                pipaWithHoldSender.notes == std::vector<char>({'S', 'W'}),
+            "the pipa stream plays independently while its paired note is held");
+
+    RecordingSender parallelPipaHoldSender;
+    const auto parallelPipaHoldScore = ScoreParser::parseText("({A-}[QW])  /").score;
+    const auto parallelPipaHoldResult = player.play(parallelPipaHoldScore, parallelPipaHoldSender, options);
+    require(parallelPipaHoldResult.status == PlaybackStatus::Completed &&
+                parallelPipaHoldSender.pressed == std::vector<std::vector<char>>{{'A'}} &&
+                parallelPipaHoldSender.released == std::vector<std::vector<char>>{{'A'}} &&
+                parallelPipaHoldSender.notes == std::vector<char>({'Q', 'W'}),
+            "a merged parenthesized pipa and long hold retain independent playback streams");
+
+    RecordingSender parallelChordPipaSender;
+    const auto parallelChordPipaScore = ScoreParser::parseText("((QW)[AS])  /").score;
+    const auto parallelChordPipaResult = player.play(parallelChordPipaScore, parallelChordPipaSender, options);
+    require(parallelChordPipaResult.status == PlaybackStatus::Completed &&
+                parallelChordPipaSender.chords == std::vector<std::vector<char>>{{'A', 'Q', 'W'}, {'S'}},
+            "a merged parenthesized chord plays with the first pipa step");
+
+    RecordingSender offsetPipaSender;
+    const auto offsetPipaScore = ScoreParser::parseText("{A--}[QW]  /").score;
+    const auto offsetPipaResult = player.play(offsetPipaScore, offsetPipaSender, options);
+    require(offsetPipaResult.status == PlaybackStatus::Completed &&
+                offsetPipaSender.pressed == std::vector<std::vector<char>>{{'A'}} &&
+                offsetPipaSender.released == std::vector<std::vector<char>>{{'A'}} &&
+                offsetPipaSender.notes == std::vector<char>({'Q', 'W'}),
+            "a pipa beginning one cell after a hold still plays while that hold is active");
+
     RecordingSender endingHoldSender;
     std::vector<std::size_t> endingHoldProgress;
     const auto endingHoldScore = ScoreParser::parseText("ABC{W---}/").score;

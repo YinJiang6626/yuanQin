@@ -208,7 +208,7 @@ bool MainWindow::create(HINSTANCE instance, int showCommand) {
     const int x = std::max(0, (GetSystemMetrics(SM_CXSCREEN) - width) / 2);
     const int y = std::max(0, (GetSystemMetrics(SM_CYSCREEN) - height) / 2);
     window_ = CreateWindowExW(WS_EX_LAYERED | WS_EX_TOPMOST, kMainWindowClassName,
-                              L"幽歌琴谱", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
+                              L"沃来弹", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
                               x, y, width, height, nullptr, nullptr, instance, this);
     if (!window_) {
         return false;
@@ -1339,7 +1339,7 @@ void MainWindow::paint() {
     SelectObject(context, titleFont_);
     SetTextColor(context, kWhite);
     RECT titleRect{105, 19, 500, 55};
-    DrawTextW(context, L"幽歌琴谱", -1, &titleRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    DrawTextW(context, L"沃来弹", -1, &titleRect, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
     SelectObject(context, subtitleFont_);
     SetTextColor(context, RGB(205, 244, 246));
     RECT subtitleRect{107, 55, 530, 77};
@@ -2352,7 +2352,12 @@ bool MainWindow::refreshPreparedScore(std::size_t index, bool announce) {
         return false;
     }
     auto& tab = documents_[index];
-    const std::string text = serializedDocument(tab);
+    // A .dtxt file is an editor-only two-hand representation. Playback must
+    // always pre-read the merged ordinary score, otherwise tokens such as R(
+    // and L( are incorrectly interpreted as musical input.
+    const std::string text = tab.kind == DocumentKind::Composition
+        ? tab.composition.mergedScore().toText()
+        : tab.document.toText();
     auto parsed = core::ScoreParser::parseText(text);
     tab.preparedScore = std::move(parsed.score);
     tab.preparedScoreText = text;
@@ -2880,12 +2885,12 @@ void MainWindow::invoke(ToolbarAction action) {
 
 void MainWindow::updateWindowTitle() {
     if (documents_.empty()) {
-        SetWindowTextW(window_, L"幽歌琴谱");
+        SetWindowTextW(window_, L"沃来弹");
         return;
     }
     const auto& document = documents_[activeDocument_];
     const std::wstring title = document.displayName + (document.modified ? L" *" : L"") +
-                               L" — 幽歌琴谱";
+                               L" — 沃来弹";
     SetWindowTextW(window_, title.c_str());
     InvalidateRect(window_, nullptr, FALSE);
 }

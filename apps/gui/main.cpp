@@ -7,7 +7,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE, LPSTR, int showCommand) {
 
     yuanqin::app::MainWindow mainWindow;
     if (!mainWindow.create(instance, showCommand)) {
-        MessageBoxW(nullptr, L"无法创建应用窗口。", L"幽歌琴谱", MB_OK | MB_ICONERROR);
+        MessageBoxW(nullptr, L"无法创建应用窗口。", L"沃来弹", MB_OK | MB_ICONERROR);
         return 1;
     }
 

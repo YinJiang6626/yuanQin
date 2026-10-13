@@ -4,6 +4,7 @@
 #include <cctype>
 #include <fstream>
 #include <iterator>
+#include <optional>
 #include <utility>
 
 namespace yuanqin::core {
@@ -61,6 +62,7 @@ std::vector<char> parseGroup(std::string_view source, std::size_t& index, char c
 struct ParsedArpeggio {
     std::vector<char> notes;
     std::vector<std::vector<char>> steps;
+    std::vector<EmbeddedHold> holds;
 };
 
 struct ParsedHold {
@@ -104,21 +106,59 @@ ParsedHold parseHold(std::string_view source, std::size_t& index,
 struct ParsedChord {
     std::vector<char> notes;
     std::vector<EmbeddedHold> holds;
+    std::optional<ParsedArpeggio> arpeggio;
     bool hasStopMarker{false};
 };
 
-// Unlike parseGroup, a normal chord can contain one or more independent
-// long-holds.  Keeping them separate lets playback tap the chord notes while
-// the brace notes remain physically pressed.
+void appendUniqueNotes(std::vector<char>& destination, const std::vector<char>& source) {
+    for (const char note : source) {
+        if (std::find(destination.begin(), destination.end(), note) == destination.end()) {
+            destination.push_back(note);
+        }
+    }
+}
+
+void mergeArpeggios(ParsedArpeggio& destination, ParsedArpeggio source) {
+    appendUniqueNotes(destination.notes, source.notes);
+    destination.holds.insert(destination.holds.end(),
+                             std::make_move_iterator(source.holds.begin()),
+                             std::make_move_iterator(source.holds.end()));
+    const std::size_t count = std::max(destination.steps.size(), source.steps.size());
+    destination.steps.resize(count);
+    for (std::size_t step = 0; step < source.steps.size(); ++step) {
+        appendUniqueNotes(destination.steps[step], source.steps[step]);
+    }
+}
+
+ParsedArpeggio parseArpeggio(std::string_view source, std::size_t& index,
+                             std::size_t sourceOffset, ParseResult& result);
+
+// A parenthesized group is the parallel-composition container. It can carry
+// ordinary chord notes, long holds, and pipa streams at the same score cell.
 ParsedChord parseChord(std::string_view source, std::size_t& index,
                        std::size_t sourceOffset, ParseResult& result) {
     ParsedChord chord;
     const std::size_t groupStart = index - 1;
 
+    const auto mergeNestedChord = [&chord](ParsedChord nested) {
+        appendUniqueNotes(chord.notes, nested.notes);
+        chord.holds.insert(chord.holds.end(),
+                           std::make_move_iterator(nested.holds.begin()),
+                           std::make_move_iterator(nested.holds.end()));
+        chord.hasStopMarker = chord.hasStopMarker || nested.hasStopMarker;
+        if (nested.arpeggio) {
+            if (chord.arpeggio) {
+                mergeArpeggios(*chord.arpeggio, std::move(*nested.arpeggio));
+            } else {
+                chord.arpeggio = std::move(nested.arpeggio);
+            }
+        }
+    };
+
     while (index < source.size() && source[index] != ')') {
         const char value = source[index++];
         if (ScoreParser::isPlayableNote(value)) {
-            chord.notes.push_back(normalizeNote(value));
+            appendUniqueNotes(chord.notes, std::vector<char>{normalizeNote(value)});
             continue;
         }
         if (value == '{') {
@@ -126,6 +166,21 @@ ParsedChord parseChord(std::string_view source, std::size_t& index,
             if (!hold.notes.empty()) {
                 chord.holds.push_back({std::move(hold.notes), hold.ticks});
             }
+            continue;
+        }
+        if (value == '[') {
+            auto arpeggio = parseArpeggio(source, index, sourceOffset, result);
+            if (!arpeggio.steps.empty()) {
+                if (chord.arpeggio) {
+                    mergeArpeggios(*chord.arpeggio, std::move(arpeggio));
+                } else {
+                    chord.arpeggio = std::move(arpeggio);
+                }
+            }
+            continue;
+        }
+        if (value == '(') {
+            mergeNestedChord(parseChord(source, index, sourceOffset, result));
             continue;
         }
         if (value == '|') {
@@ -160,13 +215,23 @@ ParsedArpeggio parseArpeggio(std::string_view source, std::size_t& index,
             continue;
         }
         if (value == '(') {
-            auto chord = parseGroup(source, index, ')', sourceOffset, result);
-            if (!chord.empty()) {
-                arpeggio.notes.insert(arpeggio.notes.end(), chord.begin(), chord.end());
-                arpeggio.steps.push_back(std::move(chord));
+            auto chord = parseChord(source, index, sourceOffset, result);
+            if (!chord.notes.empty()) {
+                appendUniqueNotes(arpeggio.notes, chord.notes);
+                arpeggio.steps.push_back(std::move(chord.notes));
             } else {
                 addDiagnostic(result, sourceOffset + index - 1,
                               "琵琶音内的空和弦已忽略。");
+            }
+            arpeggio.holds.insert(arpeggio.holds.end(),
+                                  std::make_move_iterator(chord.holds.begin()),
+                                  std::make_move_iterator(chord.holds.end()));
+            continue;
+        }
+        if (value == '{') {
+            auto hold = parseHold(source, index, sourceOffset, result);
+            if (!hold.notes.empty()) {
+                arpeggio.holds.push_back({std::move(hold.notes), hold.ticks});
             }
             continue;
         }
@@ -229,19 +294,30 @@ SourceCellKind readSourceCell(std::string_view source, std::size_t& index) {
         bool hasStopMarker = false;
         bool hasNotes = false;
         std::size_t braceDepth = 0;
+        std::size_t parenthesisDepth = 1;
+        bool hasArpeggio = false;
         while (index < source.size()) {
             const char current = source[index++];
             if (current == '{') {
                 ++braceDepth;
             } else if (current == '}' && braceDepth > 0) {
                 --braceDepth;
+            } else if (braceDepth == 0 && current == '(') {
+                ++parenthesisDepth;
             } else if (current == '|' && braceDepth == 0) {
                 hasStopMarker = true;
+            } else if (braceDepth == 0 && current == '[') {
+                hasArpeggio = true;
             } else if (current == ')' && braceDepth == 0) {
-                break;
+                if (--parenthesisDepth == 0) {
+                    break;
+                }
             } else if (braceDepth == 0 && ScoreParser::isPlayableNote(current)) {
                 hasNotes = true;
             }
+        }
+        if (hasArpeggio) {
+            return SourceCellKind::Arpeggio;
         }
         return hasStopMarker ? (hasNotes ? SourceCellKind::SoundingStopMarker
                                          : SourceCellKind::SilentStopMarker)
@@ -337,7 +413,8 @@ void parseMeasure(std::string_view source, std::size_t sourceOffset, ParseResult
 
         if (value == '(') {
             auto chord = parseChord(source, index, sourceOffset, result);
-            if (chord.notes.empty() && chord.holds.empty() && !chord.hasStopMarker) {
+            if (chord.notes.empty() && chord.holds.empty() && !chord.arpeggio &&
+                !chord.hasStopMarker) {
                 if (tick < kTicksPerMeasure) {
                     ++tick;
                 }
@@ -345,10 +422,26 @@ void parseMeasure(std::string_view source, std::size_t sourceOffset, ParseResult
                 continue;
             }
             NoteEvent event;
-            event.style = PlayStyle::Chord;
-            event.notes = std::move(chord.notes);
+            event.style = chord.arpeggio ? PlayStyle::Arpeggio : PlayStyle::Chord;
+            if (chord.arpeggio) {
+                event.arpeggioSteps = std::move(chord.arpeggio->steps);
+                event.notes = std::move(chord.arpeggio->notes);
+                if (!chord.notes.empty()) {
+                    if (event.arpeggioSteps.empty()) {
+                        event.arpeggioSteps.push_back(chord.notes);
+                    } else {
+                        appendUniqueNotes(event.arpeggioSteps.front(), chord.notes);
+                    }
+                    appendUniqueNotes(event.notes, chord.notes);
+                }
+                event.embeddedHolds = std::move(chord.arpeggio->holds);
+            } else {
+                event.notes = std::move(chord.notes);
+            }
             event.arpeggioStop = chord.hasStopMarker;
-            event.embeddedHolds = std::move(chord.holds);
+            event.embeddedHolds.insert(event.embeddedHolds.end(),
+                                       std::make_move_iterator(chord.holds.begin()),
+                                       std::make_move_iterator(chord.holds.end()));
             addEvent(measure, tick, std::move(event), result, sourceOffset + index - 1);
             continue;
         }
@@ -366,6 +459,7 @@ void parseMeasure(std::string_view source, std::size_t sourceOffset, ParseResult
             event.style = PlayStyle::Arpeggio;
             event.notes = std::move(arpeggio.notes);
             event.arpeggioSteps = std::move(arpeggio.steps);
+            event.embeddedHolds = std::move(arpeggio.holds);
             addEvent(measure, tick, std::move(event), result, sourceOffset + index - 1);
             continue;
         }

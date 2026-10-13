@@ -55,6 +55,15 @@ int main() {
                 nestedEvent.arpeggioSteps[3] == std::vector<char>({'F'}),
             "remaining pipa notes stay sequential");
 
+    const auto pipaWithHold = ScoreParser::parseText("[{A---}QWER]/");
+    const auto& pipaWithHoldEvent = *pipaWithHold.score.ticks()[0];
+    require(pipaWithHoldEvent.style == PlayStyle::Arpeggio &&
+                pipaWithHoldEvent.arpeggioSteps.size() == 4 &&
+                pipaWithHoldEvent.embeddedHolds.size() == 1 &&
+                pipaWithHoldEvent.embeddedHolds[0].notes == std::vector<char>({'A'}) &&
+                pipaWithHoldEvent.embeddedHolds[0].holdTicks == 4,
+            "a pipa can carry an independent long hold in the same score cell");
+
     const auto pipaMeasure = ScoreParser::parseText("[XVAF]   /");
     require(pipaMeasure.score.ticks()[0]->style == PlayStyle::Arpeggio, "pipa event is retained");
     require(!pipaMeasure.score.ticks()[1] && !pipaMeasure.score.ticks()[2] &&
@@ -114,6 +123,29 @@ int main() {
                 embeddedHoldLast.score.ticks()[0]->embeddedHolds[0].holdTicks ==
                     embeddedHoldFirst.score.ticks()[0]->embeddedHolds[0].holdTicks,
             "embedded holds have the same meaning regardless of their order in a chord");
+
+    const auto parallelPipaAndHold = ScoreParser::parseText("({W------}[ASDFGH])/");
+    const auto& parallelPipaAndHoldEvent = *parallelPipaAndHold.score.ticks()[0];
+    require(parallelPipaAndHoldEvent.style == PlayStyle::Arpeggio &&
+                parallelPipaAndHoldEvent.arpeggioSteps.size() == 6 &&
+                parallelPipaAndHoldEvent.embeddedHolds.size() == 1 &&
+                parallelPipaAndHoldEvent.embeddedHolds[0].notes == std::vector<char>({'W'}) &&
+                parallelPipaAndHoldEvent.embeddedHolds[0].holdTicks == 7,
+            "a parenthesized parallel group recognizes a pipa and long hold together");
+
+    const auto parallelChordAndPipa = ScoreParser::parseText("((QW)[ASDF])/");
+    const auto& parallelChordAndPipaEvent = *parallelChordAndPipa.score.ticks()[0];
+    require(parallelChordAndPipaEvent.style == PlayStyle::Arpeggio &&
+                parallelChordAndPipaEvent.arpeggioSteps.size() == 4 &&
+                parallelChordAndPipaEvent.arpeggioSteps[0] == std::vector<char>({'A', 'Q', 'W'}),
+            "a normal chord is simultaneous with the first step of its nested pipa");
+
+    const auto nestedPipaHold = ScoreParser::parseText("[({W--}A)S]/");
+    require(nestedPipaHold.score.ticks()[0]->embeddedHolds.size() == 1 &&
+                nestedPipaHold.score.ticks()[0]->embeddedHolds[0].notes ==
+                    std::vector<char>({'W'}) &&
+                nestedPipaHold.score.ticks()[0]->embeddedHolds[0].holdTicks == 3,
+            "a pipa chord continues to recognize a long hold nested inside its first step");
 
     const auto endingHold = ScoreParser::parseText("ABC{W---}/");
     require(endingHold.score.tickCount() == 4 && endingHold.score.playbackTickCount() == 7,
